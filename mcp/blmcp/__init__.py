@@ -17,9 +17,12 @@ import argparse
 import importlib
 import os
 import pkgutil
+from typing import Any
 
 import yaml
-from mcp.server.fastmcp import FastMCP  # pylint: disable=import-error,no-name-in-module
+from mcp.server.mcpserver import (
+    MCPServer,  # pylint: disable=import-error,no-name-in-module
+)
 
 # NOTE(@ideasman42): this was written to support LLAMA-C++'s Web UI,
 # which is one of the nicer ways to run this locally.
@@ -57,7 +60,7 @@ def main() -> int:
     with open(os.path.join(data_dir, "prompts.yml"), encoding="utf-8") as fh:
         prompts = yaml.safe_load(fh)
 
-    mcp = FastMCP("blender-mcp", instructions=str(prompts["initial_instructions"]))
+    mcp = MCPServer("blender-mcp", instructions=str(prompts["initial_instructions"]))
 
     # Auto-discover and register all tools (they are never un-registered).
     import blmcp.tools as tools_pkg
@@ -69,29 +72,18 @@ def main() -> int:
         if hasattr(mod, "register"):
             mod.register(mcp)
 
-    transport = args.transport
-    if _USE_HTTP_SUPPORT and transport == "http":
+    if _USE_HTTP_SUPPORT and args.transport == "http":
         # pylint: disable-next=import-error,no-name-in-module
-        from mcp.server.fastmcp.server import TransportSecuritySettings  # type: ignore[attr-defined]
+        from mcp.server.transport_security import TransportSecuritySettings
         from starlette.applications import Starlette
         from starlette.middleware.cors import CORSMiddleware
-
-        transport = "streamable-http"
-
-        mcp.settings.host = args.host
-        mcp.settings.port = args.port
-        mcp.settings.streamable_http_path = "/"
-        mcp.settings.stateless_http = True
-        mcp.settings.transport_security = TransportSecuritySettings(
-            enable_dns_rebinding_protection=False,
-        )
 
         # Add CORS middleware so browser-based clients
         # (e.g. llama.cpp web UI) can connect without preflight failures.
         _orig = mcp.streamable_http_app
 
-        def _app_with_cors() -> Starlette:
-            app = _orig()
+        def _app_with_cors(**kwargs: Any) -> Starlette:
+            app = _orig(**kwargs)
             app.add_middleware(
                 CORSMiddleware,
                 allow_origins=["*"],
@@ -102,5 +94,16 @@ def main() -> int:
 
         mcp.streamable_http_app = _app_with_cors  # type: ignore[method-assign]
 
-    mcp.run(transport=transport)
+        mcp.run(
+            transport="streamable-http",
+            host=args.host,
+            port=args.port,
+            streamable_http_path="/",
+            stateless_http=True,
+            transport_security=TransportSecuritySettings(
+                enable_dns_rebinding_protection=False,
+            ),
+        )
+    else:
+        mcp.run(transport="stdio")
     return 0
