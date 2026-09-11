@@ -10,15 +10,15 @@ __all__ = (
 
 from blmcp.tools_helpers.blender_cli import run_blender_cli, synced_blend_for_cli
 from blmcp.tools_helpers.connection import send_code
-from mcp.server.fastmcp import FastMCP  # pylint: disable=import-error,no-name-in-module
+from mcp.server.mcpserver import MCPServer  # pylint: disable=import-error,no-name-in-module
 from mcp.types import ToolAnnotations  # pylint: disable=import-error,no-name-in-module
 
 
-def register(mcp: FastMCP) -> None:
+def register(mcp: MCPServer) -> None:
     @mcp.tool(
         annotations=ToolAnnotations(
             title="Execute Python Code",
-            destructiveHint=True,
+            destructive_hint=True,
         )
     )
     def execute_blender_code(code: str) -> dict[str, object]:
@@ -37,7 +37,7 @@ def register(mcp: FastMCP) -> None:
     @mcp.tool(
         annotations=ToolAnnotations(
             title="Execute Python Code for Command-Line",
-            destructiveHint=True,
+            destructive_hint=True,
         )
     )
     def execute_blender_code_for_cli(blend_file: str, code: str) -> dict[str, object]:

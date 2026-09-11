@@ -14,17 +14,17 @@ from blmcp.tools_helpers import (
     toolcode_wrap_with_calling_convention,
 )
 from blmcp.tools_helpers.connection import send_code
-from mcp.server.fastmcp import FastMCP  # pylint: disable=import-error,no-name-in-module
+from mcp.server.mcpserver import MCPServer  # pylint: disable=import-error,no-name-in-module
 from mcp.types import ToolAnnotations  # pylint: disable=import-error,no-name-in-module
 
 _TOOL_CALL = toolcode_wrap_with_calling_convention(toolcode_load_from_filepath(__file__))
 
 
-def register(mcp: FastMCP) -> None:
+def register(mcp: MCPServer) -> None:
     @mcp.tool(
         annotations=ToolAnnotations(
             title="Get Objects Summary",
-            readOnlyHint=True,
+            read_only_hint=True,
         )
     )
     def get_objects_summary() -> dict[str, object]:

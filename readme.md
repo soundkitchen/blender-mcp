@@ -1,5 +1,56 @@
 # Blender MCP
 
+> **This repository is a fork.**
+>
+> The upstream project is Blender Lab's
+> [projects.blender.org/lab/blender_mcp](https://projects.blender.org/lab/blender_mcp).
+> [soundkitchen/blender-mcp](https://github.com/soundkitchen/blender-mcp) is
+> derived from it and maintained independently.
+>
+> Main differences from upstream:
+>
+> - Dependencies (such as the `mcp` Python SDK) are updated to recent versions as needed
+>   (upstream pins `mcp<2`; this fork has migrated to the `mcp>=2` API).
+> - The server can be run directly with `uvx`.
+>
+> For the upstream documentation see
+> [blender.org/lab/mcp-server](https://www.blender.org/lab/mcp-server/).
+> Upstream changes are merged in regularly.
+
+## Running with uvx
+
+The Python package lives under `mcp/`, so pass the subdirectory via `--from`.
+The Blender add-on (see "Blender Add-on" below) must be installed separately.
+
+```sh
+uvx --from "git+https://github.com/soundkitchen/blender-mcp#subdirectory=mcp" blender-mcp
+```
+
+Example MCP client configuration (Claude Desktop, Claude Code and others using the `mcpServers` format):
+
+```json
+{
+  "mcpServers": {
+    "blender": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/soundkitchen/blender-mcp#subdirectory=mcp",
+        "blender-mcp"
+      ]
+    }
+  }
+}
+```
+
+To use the HTTP transport (e.g. for the llama.cpp web UI):
+
+```sh
+uvx --from "git+https://github.com/soundkitchen/blender-mcp#subdirectory=mcp" blender-mcp --transport http --port 8000
+```
+
+To try a local checkout, use `uvx --from ./mcp blender-mcp`.
+
 ## Overview
 
 A lightweight MCP (Model Context Protocol) server for Blender.

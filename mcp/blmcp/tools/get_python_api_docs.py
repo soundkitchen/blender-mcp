@@ -17,7 +17,7 @@ from blmcp.tools_helpers.rst_parse_docs import (
     find_definition_in_doctree,
     list_doctree_definitions,
 )
-from mcp.server.fastmcp import FastMCP  # pylint: disable=import-error,no-name-in-module
+from mcp.server.mcpserver import MCPServer  # pylint: disable=import-error,no-name-in-module
 from mcp.types import ToolAnnotations  # pylint: disable=import-error,no-name-in-module
 
 
@@ -360,11 +360,11 @@ def _collect_examples(content: str, api_path: str) -> list[dict[str, str]]:
 # Tool registration.
 
 
-def register(mcp: FastMCP) -> None:
+def register(mcp: MCPServer) -> None:
     @mcp.tool(
         annotations=ToolAnnotations(
             title="Get Python API Docs",
-            readOnlyHint=True,
+            read_only_hint=True,
         )
     )
     def get_python_api_docs(identifier: str) -> dict[str, object]:
