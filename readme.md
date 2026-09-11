@@ -1,32 +1,32 @@
 # Blender MCP
 
-> **このリポジトリは fork です。**
+> **This repository is a fork.**
 >
-> 本家は Blender Lab の
-> [projects.blender.org/lab/blender_mcp](https://projects.blender.org/lab/blender_mcp) です。
-> [soundkitchen/blender-mcp](https://github.com/soundkitchen/blender-mcp) は
-> そこから派生し、独自にメンテナンスしています。
+> The upstream project is Blender Lab's
+> [projects.blender.org/lab/blender_mcp](https://projects.blender.org/lab/blender_mcp).
+> [soundkitchen/blender-mcp](https://github.com/soundkitchen/blender-mcp) is
+> derived from it and maintained independently.
 >
-> 本家との主な違い:
+> Main differences from upstream:
 >
-> - 依存パッケージ(`mcp` Python SDK など)を必要に応じて最新版へ更新する
->   (本家は `mcp<2` に固定。この fork は `mcp>=2` の API に移行済み)
-> - `uvx` で直接実行できるようにする
+> - Dependencies (such as the `mcp` Python SDK) are updated to recent versions as needed
+>   (upstream pins `mcp<2`; this fork has migrated to the `mcp>=2` API).
+> - The server can be run directly with `uvx`.
 >
-> 本家のドキュメントは
-> [blender.org/lab/mcp-server](https://www.blender.org/lab/mcp-server/) を参照してください。
-> 上流の変更は随時取り込みます。
+> For the upstream documentation see
+> [blender.org/lab/mcp-server](https://www.blender.org/lab/mcp-server/).
+> Upstream changes are merged in regularly.
 
-## uvx で実行する
+## Running with uvx
 
-Python パッケージは `mcp/` 以下にあるため、`--from` で subdirectory を指定します。
-Blender 側には別途 add-on(下記「Blender Add-on」参照)のインストールが必要です。
+The Python package lives under `mcp/`, so pass the subdirectory via `--from`.
+The Blender add-on (see "Blender Add-on" below) must be installed separately.
 
 ```sh
 uvx --from "git+https://github.com/soundkitchen/blender-mcp#subdirectory=mcp" blender-mcp
 ```
 
-MCP クライアントの設定例(Claude Desktop / Claude Code など、`mcpServers` 形式):
+Example MCP client configuration (Claude Desktop, Claude Code and others using the `mcpServers` format):
 
 ```json
 {
@@ -43,13 +43,13 @@ MCP クライアントの設定例(Claude Desktop / Claude Code など、`mcpSer
 }
 ```
 
-HTTP transport で起動する場合(llama.cpp の Web UI など向け):
+To use the HTTP transport (e.g. for the llama.cpp web UI):
 
 ```sh
 uvx --from "git+https://github.com/soundkitchen/blender-mcp#subdirectory=mcp" blender-mcp --transport http --port 8000
 ```
 
-ローカルの checkout から試す場合は `uvx --from ./mcp blender-mcp` と指定します。
+To try a local checkout, use `uvx --from ./mcp blender-mcp`.
 
 ## Overview
 
