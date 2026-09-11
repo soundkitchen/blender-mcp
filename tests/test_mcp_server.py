@@ -126,13 +126,13 @@ def _query_server() -> dict[str, Any]:
                 init_result = await session.initialize()
                 tools_result = await session.list_tools()
                 return {
-                    "server_info": init_result.serverInfo,
+                    "server_info": init_result.server_info,
                     "instructions": init_result.instructions or "",
                     "tools": [
                         {
                             "name": t.name,
                             "description": t.description or "",
-                            "inputSchema": t.inputSchema,
+                            "inputSchema": t.input_schema,
                         }
                         for t in tools_result.tools
                     ],
@@ -158,11 +158,11 @@ def _call_server_tool(name: str, arguments: dict[str, object]) -> dict[str, Any]
             async with ClientSession(read, write) as session:
                 await session.initialize()
                 call_result = await session.call_tool(name, arguments)
-                if call_result.isError:
+                if call_result.is_error:
                     raise RuntimeError(
                         "Tool {:s} returned error: {!r}".format(name, call_result.content)
                     )
-                # FastMCP serialises dict return values as a single JSON
+                # MCPServer serialises dict return values as a single JSON
                 # text-content block.
                 text = call_result.content[0].text  # type: ignore[attr-defined]
                 payload = json.loads(text)
@@ -572,13 +572,13 @@ class TestMainConfiguration(unittest.TestCase):
         with (
             mock.patch.object(sys, "argv", ["blmcp"]),
             mock.patch.object(
-                blmcp, "FastMCP", return_value=mcp_instance
-            ) as fastmcp_cls,
+                blmcp, "MCPServer", return_value=mcp_instance
+            ) as mcpserver_cls,
             mock.patch.object(blmcp.pkgutil, "iter_modules", return_value=[]),
         ):
             result = blmcp.main()
         self.assertEqual(result, 0)
-        fastmcp_cls.assert_called_once_with(
+        mcpserver_cls.assert_called_once_with(
             "blender-mcp",
             instructions=str(self._prompts["initial_instructions"]),
         )
@@ -595,7 +595,7 @@ class TestMainConfiguration(unittest.TestCase):
 
         with (
             mock.patch.object(sys, "argv", ["blmcp"]),
-            mock.patch.object(blmcp, "FastMCP", return_value=mcp_instance),
+            mock.patch.object(blmcp, "MCPServer", return_value=mcp_instance),
             mock.patch.object(
                 blmcp.pkgutil,
                 "iter_modules",
@@ -635,7 +635,7 @@ class TestMainConfiguration(unittest.TestCase):
 
         with (
             mock.patch.object(sys, "argv", ["blmcp"]),
-            mock.patch.object(blmcp, "FastMCP", return_value=mcp_instance),
+            mock.patch.object(blmcp, "MCPServer", return_value=mcp_instance),
             mock.patch.object(
                 blmcp.pkgutil,
                 "iter_modules",
@@ -678,11 +678,11 @@ class TestMainConfiguration(unittest.TestCase):
 
         fake_app = FakeApp()
         mcp_instance = mock.Mock()
-        mcp_instance.settings = types.SimpleNamespace()
-        mcp_instance.streamable_http_app = mock.Mock(return_value=fake_app)
+        orig_app_factory = mock.Mock(return_value=fake_app)
+        mcp_instance.streamable_http_app = orig_app_factory
 
-        fastmcp_server_mod = types.ModuleType("mcp.server.fastmcp.server")
-        fastmcp_server_mod.TransportSecuritySettings = FakeTransportSecuritySettings
+        transport_security_mod = types.ModuleType("mcp.server.transport_security")
+        transport_security_mod.TransportSecuritySettings = FakeTransportSecuritySettings
         starlette_apps_mod = types.ModuleType("starlette.applications")
         starlette_apps_mod.Starlette = object
         starlette_cors_mod = types.ModuleType("starlette.middleware.cors")
@@ -694,12 +694,12 @@ class TestMainConfiguration(unittest.TestCase):
                 "argv",
                 ["blmcp", "--transport", "http", "--host", "0.0.0.0", "--port", "8123"],
             ),
-            mock.patch.object(blmcp, "FastMCP", return_value=mcp_instance),
+            mock.patch.object(blmcp, "MCPServer", return_value=mcp_instance),
             mock.patch.object(blmcp.pkgutil, "iter_modules", return_value=[]),
             mock.patch.dict(
                 sys.modules,
                 {
-                    "mcp.server.fastmcp.server": fastmcp_server_mod,
+                    "mcp.server.transport_security": transport_security_mod,
                     "starlette.applications": starlette_apps_mod,
                     "starlette.middleware.cors": starlette_cors_mod,
                 },
@@ -708,22 +708,29 @@ class TestMainConfiguration(unittest.TestCase):
             result = blmcp.main()
 
         self.assertEqual(result, 0)
-        self.assertEqual(mcp_instance.settings.host, "0.0.0.0")
-        self.assertEqual(mcp_instance.settings.port, 8123)
-        self.assertEqual(mcp_instance.settings.streamable_http_path, "/")
-        self.assertTrue(mcp_instance.settings.stateless_http)
+        # mcp 2.x: transport settings are passed to ``run()`` as keyword
+        # arguments (``mcp.settings.*`` no longer exists).
+        mcp_instance.run.assert_called_once()
+        run_kwargs = mcp_instance.run.call_args.kwargs
+        self.assertEqual(run_kwargs["transport"], "streamable-http")
+        self.assertEqual(run_kwargs["host"], "0.0.0.0")
+        self.assertEqual(run_kwargs["port"], 8123)
+        self.assertEqual(run_kwargs["streamable_http_path"], "/")
+        self.assertTrue(run_kwargs["stateless_http"])
         self.assertIsInstance(
-            mcp_instance.settings.transport_security,
+            run_kwargs["transport_security"],
             FakeTransportSecuritySettings,
         )
         self.assertEqual(
-            mcp_instance.settings.transport_security.kwargs,
+            run_kwargs["transport_security"].kwargs,
             {"enable_dns_rebinding_protection": False},
         )
-        mcp_instance.run.assert_called_once_with(transport="streamable-http")
 
-        app = mcp_instance.streamable_http_app()
+        # ``streamable_http_app()`` takes keyword arguments in mcp 2.x,
+        # the CORS wrapper must pass them through.
+        app = mcp_instance.streamable_http_app(stateless_http=True)
         self.assertIs(app, fake_app)
+        orig_app_factory.assert_called_once_with(stateless_http=True)
         self.assertEqual(
             fake_app.middleware_calls,
             [

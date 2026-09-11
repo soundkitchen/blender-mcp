@@ -213,7 +213,7 @@ async def _call_tool(
         else:
             parts.append("[{:s}]".format(item.type))
     text = "\n".join(parts)
-    if result.isError:
+    if result.is_error:
         return "ERROR: {:s}".format(text)
     return text
 
@@ -256,7 +256,7 @@ async def _run(
                 {
                     "name": t.name,
                     "description": t.description or "",
-                    "inputSchema": t.inputSchema,
+                    "inputSchema": t.input_schema,
                 }
                 for t in tools_result.tools
             ]

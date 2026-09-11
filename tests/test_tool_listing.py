@@ -676,7 +676,7 @@ def _list_tools() -> list[dict[str, object]]:
                     {
                         "name": t.name,
                         "description": t.description,
-                        "inputSchema": t.inputSchema,
+                        "inputSchema": t.input_schema,
                     }
                     for t in result.tools
                 ]
