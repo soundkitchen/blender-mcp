@@ -25,6 +25,9 @@ class Result(NamedTuple):
     type: str | None = None
     location: list[float] | None = None
     rotation: list[float] | None = None
+    rotation_mode: str | None = None
+    rotation_quaternion: list[float] | None = None
+    rotation_axis_angle: list[float] | None = None
     scale: list[float] | None = None
     dimensions: list[float] | None = None
     parent: str | None = None
@@ -51,12 +54,31 @@ def main(params: Params) -> Result:
             ),
         )
 
+    # `rotation_euler` is only used when `rotation_mode` is an Euler order,
+    # otherwise it holds a stale value. Always report a valid Euler rotation
+    # and include the native values so callers know which property to write.
+    rotation_mode = obj.rotation_mode
+    rotation_quaternion = None
+    rotation_axis_angle = None
+    if rotation_mode in {'QUATERNION', 'AXIS_ANGLE'}:
+        # Decompose to ignore scale, then convert using the default XYZ order.
+        rotation = list(obj.matrix_basis.decompose()[1].to_euler('XYZ'))
+        if rotation_mode == 'QUATERNION':
+            rotation_quaternion = list(obj.rotation_quaternion)
+        else:
+            rotation_axis_angle = list(obj.rotation_axis_angle)
+    else:
+        rotation = list(obj.rotation_euler)
+
     return Result(
         status="ok",
         name=obj.name,
         type=obj.type,
         location=list(obj.location),
-        rotation=list(obj.rotation_euler),
+        rotation=rotation,
+        rotation_mode=rotation_mode,
+        rotation_quaternion=rotation_quaternion,
+        rotation_axis_angle=rotation_axis_angle,
         scale=list(obj.scale),
         dimensions=list(obj.dimensions),
         parent=obj.parent.name if obj.parent else None,

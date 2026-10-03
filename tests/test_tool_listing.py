@@ -221,7 +221,12 @@ EXPECTED_TOOLS = [
         "Return a structured summary of the object identified by *name*.\n"
         "\n"
         "Includes type, transforms, parent, children, modifiers, constraints,\n"
-        "materials, visibility, data-block name, and collections.\n",
+        "materials, visibility, data-block name, and collections.\n"
+        "\n"
+        "``rotation`` is always an Euler rotation in radians (in the object's\n"
+        "Euler order, or ``XYZ`` when ``rotation_mode`` is not an Euler order).\n"
+        "``rotation_quaternion`` (W, X, Y, Z) or ``rotation_axis_angle``\n"
+        "(angle, X, Y, Z) hold the native values for those modes.\n",
         "inputSchema": {
             "properties": {
                 "name": {
