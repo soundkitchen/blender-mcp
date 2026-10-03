@@ -27,6 +27,7 @@ import base64
 import glob
 import inspect
 import json
+import math
 import os
 import shlex
 import shutil
@@ -626,6 +627,9 @@ class _TestServerMixin:
         self.assertEqual(data["data_name"], "Cube")
         self.assertEqual(data["location"], [0.0, 0.0, 0.0])
         self.assertEqual(data["rotation"], [0.0, 0.0, 0.0])
+        self.assertEqual(data["rotation_mode"], "XYZ")
+        self.assertIsNone(data["rotation_quaternion"])
+        self.assertIsNone(data["rotation_axis_angle"])
         self.assertEqual(data["scale"], [1.0, 1.0, 1.0])
         self.assertEqual(data["dimensions"], [2.0, 2.0, 2.0])
         self.assertIsNone(data["parent"])
@@ -639,6 +643,56 @@ class _TestServerMixin:
             "hide_get": False,
         })
         self.assertIn("Collection", data["collections"])
+
+    def test_get_object_detail_summary_rotation_quaternion(self) -> None:
+        def code() -> None:
+            import math
+            import bpy  # type: ignore[import-not-found]
+            ob = bpy.data.objects["Cube"]
+            # Leave a stale Euler value to ensure it is not reported.
+            ob.rotation_euler = (1.0, 2.0, 3.0)
+            ob.rotation_mode = 'QUATERNION'
+            half = math.radians(45.0) / 2.0
+            ob.rotation_quaternion = (math.cos(half), math.sin(half), 0.0, 0.0)
+            ob.scale = (2.0, 3.0, 4.0)
+            result = {'ok': True}  # noqa: F841
+        self._test_tool("execute_blender_code", {
+            "code": _python_fn_body_as_string(code),
+        })
+        data = self._test_tool("get_object_detail_summary", {"name": "Cube"})
+        self.assertEqual(data["status"], "ok")
+        self.assertEqual(data["rotation_mode"], "QUATERNION")
+        self.assertIsNone(data["rotation_axis_angle"])
+        rotation = data["rotation"]
+        quaternion = data["rotation_quaternion"]
+        assert isinstance(rotation, list) and isinstance(quaternion, list)
+        for value, expected in zip(rotation, (math.radians(45.0), 0.0, 0.0)):
+            self.assertAlmostEqual(value, expected, places=5)
+        self.assertAlmostEqual(quaternion[0], math.cos(math.radians(45.0) / 2.0), places=5)
+        self.assertAlmostEqual(quaternion[1], math.sin(math.radians(45.0) / 2.0), places=5)
+
+    def test_get_object_detail_summary_rotation_axis_angle(self) -> None:
+        def code() -> None:
+            import math
+            import bpy  # type: ignore[import-not-found]
+            ob = bpy.data.objects["Cube"]
+            ob.rotation_euler = (1.0, 2.0, 3.0)
+            ob.rotation_mode = 'AXIS_ANGLE'
+            ob.rotation_axis_angle = (math.radians(30.0), 0.0, 0.0, 1.0)
+            result = {'ok': True}  # noqa: F841
+        self._test_tool("execute_blender_code", {
+            "code": _python_fn_body_as_string(code),
+        })
+        data = self._test_tool("get_object_detail_summary", {"name": "Cube"})
+        self.assertEqual(data["status"], "ok")
+        self.assertEqual(data["rotation_mode"], "AXIS_ANGLE")
+        self.assertIsNone(data["rotation_quaternion"])
+        rotation = data["rotation"]
+        axis_angle = data["rotation_axis_angle"]
+        assert isinstance(rotation, list) and isinstance(axis_angle, list)
+        for value, expected in zip(rotation, (0.0, 0.0, math.radians(30.0))):
+            self.assertAlmostEqual(value, expected, places=5)
+        self.assertAlmostEqual(axis_angle[0], math.radians(30.0), places=5)
 
     def test_get_object_detail_summary_error(self) -> None:
         data = self._test_tool("get_object_detail_summary", {"name": "NonExistent"})

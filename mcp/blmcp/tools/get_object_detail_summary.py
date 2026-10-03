@@ -36,6 +36,11 @@ def register(mcp: MCPServer) -> None:
 
         Includes type, transforms, parent, children, modifiers, constraints,
         materials, visibility, data-block name, and collections.
+
+        ``rotation`` is always an Euler rotation in radians (in the object's
+        Euler order, or ``XYZ`` when ``rotation_mode`` is not an Euler order).
+        ``rotation_quaternion`` (W, X, Y, Z) or ``rotation_axis_angle``
+        (angle, X, Y, Z) hold the native values for those modes.
         """
         p = Params(name=name)
         code = toolcode_format_call(_TOOL_CALL, p)
