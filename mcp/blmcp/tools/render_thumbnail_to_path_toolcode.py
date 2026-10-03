@@ -95,7 +95,7 @@ def main(params: Params) -> Result | Callable[[], dict[str, object] | None]:
     ]
     if rd.engine == "CYCLES":
         obj_attrs.append((scene.cycles, {"samples": _THUMB_CYCLES_SAMPLES}))
-    elif rd.engine == "BLENDER_EEVEE_NEXT":
+    elif rd.engine in {"BLENDER_EEVEE_NEXT", "BLENDER_EEVEE"}:
         obj_attrs.append((scene.eevee, {"taa_render_samples": _THUMB_EEVEE_SAMPLES}))
 
     render_args = ('INVOKE_DEFAULT',) if use_deferred else ()
