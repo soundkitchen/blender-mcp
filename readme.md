@@ -20,7 +20,8 @@
 ## Running with uvx
 
 The Python package lives under `mcp/`, so pass the subdirectory via `--from`.
-The Blender add-on (see "Blender Add-on" below) must be installed separately.
+The Blender add-on (see "Blender Add-on" below) must be installed separately;
+it can be built from this repository with `make build_addon`.
 
 ```sh
 uvx --from "git+https://github.com/soundkitchen/blender-mcp#subdirectory=mcp" blender-mcp
@@ -85,6 +86,25 @@ the MCP tools to work.
 
 The add-on provides a preferences panel for configuring the host, port,
 and an optional auto-start setting.
+
+### Installing from this repository
+
+Build an installable zip with:
+
+```sh
+make build_addon
+```
+
+Blender is looked up from `BLENDER_BIN`, then `blender` in `PATH`, then
+`/Applications/Blender.app` on macOS. Set `BLENDER_BIN` to use another binary.
+
+This writes `build/mcp-<version>.zip`. Drag and drop the zip onto a Blender
+window (or use *Edit → Preferences → Get Extensions → Install from Disk*),
+then enable the add-on.
+
+This fork keeps the upstream extension id (`mcp`) and version. If the add-on
+from the Blender Lab extensions repository is already installed, uninstall it
+first so it is clear which one is running.
 
 ### Functionality Overview
 
