@@ -327,6 +327,36 @@ EXPECTED_TOOLS = [
         }
     },
     {
+        "name": "get_scene_render_summary",
+        "description": "\n"
+        "Return the scene's render settings, color management, world, lights and camera.\n"
+        "\n"
+        "Use to find out why a render looks too dark, washed out or noisy\n"
+        "before changing anything.\n"
+        "\n"
+        "``render`` holds the engine, resolution, frame range and\n"
+        "``samples`` (final render samples, ``None`` when the engine has no\n"
+        "sample count). ``engine_settings`` only covers the active engine.\n"
+        "``color_management`` holds the display device, view transform\n"
+        "(e.g. ``AgX``), look, exposure and gamma.\n"
+        "``world`` lists the Background nodes feeding the world output used by\n"
+        "the render engine (color, strength and the node linked to each,\n"
+        "if any, skipping Reroute nodes and muted links) and the\n"
+        "Environment Texture images, it is ``None`` without a world.\n"
+        "``lights`` lists every light object in the scene, including hidden ones\n"
+        "(see ``hide_render`` and ``visible``). ``energy`` is in watts,\n"
+        "or irradiance in W/m^2 for sun lights.\n"
+        "``camera`` is the scene camera with lens, sensor, clipping, shift and\n"
+        "depth of field, or ``None`` when the scene has no camera.\n"
+        "``location`` and ``direction`` are in world space,\n"
+        "``direction`` is ``None`` for point lights.\n",
+        "inputSchema": {
+            "properties": {},
+            "title": "get_scene_render_summaryArguments",
+            "type": "object"
+        }
+    },
+    {
         "name": "get_screenshot_of_area_as_image",
         "description": "\n"
         "Take a screenshot of a single Blender area and return it as a PNG image.\n"
