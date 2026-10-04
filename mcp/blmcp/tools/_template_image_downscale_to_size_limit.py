@@ -11,6 +11,7 @@ def _image_downscale_to_size_limit(
         tmpdir: str, filepath: str,
         size_limit_in_bytes: int,
         size_tolerance_in_bytes: int = 0,
+        use_hidpi_downscale: bool = True,
 ) -> bytes:
     """
     Downscale *filepath* for HiDPI and to stay under *size_limit_in_bytes*.
@@ -18,6 +19,9 @@ def _image_downscale_to_size_limit(
     *size_tolerance_in_bytes* defines an acceptable margin below the limit.
     Once a result fits within ``size_limit - tolerance``, the search stops
     instead of continuing to find the least-downscaled option.
+
+    *use_hidpi_downscale* first downscales to logical pixel size,
+    this only makes sense for screenshots (not renders).
 
     Returns the image file contents as bytes.
     """
@@ -36,7 +40,7 @@ def _image_downscale_to_size_limit(
 
     # Downscale HiDPI images to logical pixel size.
     pixel_size = context.preferences.system.pixel_size
-    if pixel_size > 1.0:
+    if use_hidpi_downscale and pixel_size > 1.0:
         w, h = im.size
         im.resize((round(w / pixel_size), round(h / pixel_size)), method='BILINEAR')
 
