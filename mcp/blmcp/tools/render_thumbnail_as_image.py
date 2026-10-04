@@ -27,7 +27,11 @@ def register(mcp: MCPServer) -> None:
         annotations=ToolAnnotations(
             title="Render Thumbnail as Image",
             destructive_hint=True,
-        )
+        ),
+        # The result is unstructured (image + JSON text). Without this,
+        # `mcp<2.1` fails to build an output schema for `tuple[Image, str]`
+        # and the server does not start.
+        structured_output=False,
     )
     def render_thumbnail_as_image(size_limit_in_bytes: int = 0) -> tuple[Image, str]:
         """
