@@ -763,6 +763,192 @@ class _TestServerMixin:
             ],
         })
 
+    def test_get_object_geometry_summary(self) -> None:
+        def code() -> None:
+            import bpy  # type: ignore[import-not-found]
+            cube = bpy.data.objects["Cube"]
+            cube.location = (0.0, 0.0, 1.0)
+            # Simple subdivision keeps the box shape, the array doubles it along X.
+            sub = cube.modifiers.new("Subdivision", 'SUBSURF')
+            sub.subdivision_type = 'SIMPLE'
+            sub.levels = 1
+            arr = cube.modifiers.new("Array", 'ARRAY')
+            arr.count = 2
+            arr.show_render = False
+            result = {'ok': True}  # noqa: F841
+        self._test_tool("execute_blender_code", {
+            "code": _python_fn_body_as_string(code),
+        })
+        data = self._test_tool("get_object_geometry_summary", {"names": ["Cube", "Light", "NonExistent"]})
+        self.assertEqual(data["status"], "ok")
+        self.assertEqual(data["not_found"], ["NonExistent"])
+
+        objects = data["objects"]
+        assert isinstance(objects, list)
+        self.assertEqual([o["name"] for o in objects], ["Cube", "Light"])
+        cube, light = objects
+
+        self.assertEqual(cube["type"], "MESH")
+        self.assertTrue(cube["is_evaluated"])
+        self.assertEqual(cube["instance_count"], 0)
+        bounds = cube["bounds_world"]
+        for key, expected in (("min", (-1.0, -1.0, 0.0)), ("max", (3.0, 1.0, 2.0)), ("size", (4.0, 2.0, 2.0))):
+            for value, expected_value in zip(bounds[key], expected):
+                self.assertAlmostEqual(value, expected_value, places=5)
+        self.assertEqual(cube["counts_original"], {"vertices": 8, "edges": 12, "faces": 6, "triangles": 12})
+        self.assertEqual(cube["counts_evaluated"], {"vertices": 52, "edges": 96, "faces": 48, "triangles": 96})
+
+        modifiers = cube["modifiers"]
+        self.assertEqual([m["name"] for m in modifiers], ["Subdivision", "Array"])
+        subdivision, array = modifiers
+        self.assertEqual(subdivision["type"], "SUBSURF")
+        self.assertEqual(subdivision["settings"]["levels"], 1)
+        self.assertEqual(subdivision["settings"]["subdivision_type"], "SIMPLE")
+        self.assertFalse(array["show_render"])
+        self.assertEqual(array["settings"]["count"], 2)
+        self.assertIsNone(array["settings"]["offset_object"])
+        # Common and UI properties are not repeated under `settings`.
+        self.assertNotIn("name", array["settings"])
+        self.assertNotIn("show_expanded", array["settings"])
+
+        self.assertEqual(light["type"], "LIGHT")
+        self.assertIsNone(light["bounds_world"])
+        self.assertIsNone(light["counts_original"])
+        self.assertIsNone(light["counts_evaluated"])
+        self.assertEqual(light["modifiers"], [])
+
+        # The temporary mesh is transformed to world space, the object must be left untouched.
+        self.assertEqual(
+            self._test_tool("get_object_geometry_summary", {"names": ["Cube", "Light", "NonExistent"]}),
+            data,
+        )
+        data = self._test_tool("get_object_detail_summary", {"name": "Cube"})
+        self.assertEqual(data["location"], [0.0, 0.0, 1.0])
+
+    def test_get_object_geometry_summary_instances(self) -> None:
+        def code() -> None:
+            import bpy  # type: ignore[import-not-found]
+            scene = bpy.context.scene
+            cube = bpy.data.objects["Cube"]
+
+            # Instance the cube on a 3x3 grid (4 units wide) with Geometry Nodes.
+            scatter = bpy.data.objects.new("Scatter", bpy.data.meshes.new("Scatter"))
+            scatter.location = (10.0, 0.0, 0.0)
+            scene.collection.objects.link(scatter)
+            group = bpy.data.node_groups.new("Scatter", 'GeometryNodeTree')
+            group.interface.new_socket("Geometry", in_out='INPUT', socket_type='NodeSocketGeometry')
+            group.interface.new_socket("Geometry", in_out='OUTPUT', socket_type='NodeSocketGeometry')
+            grid = group.nodes.new("GeometryNodeMeshGrid")
+            grid.inputs["Vertices X"].default_value = 3
+            grid.inputs["Vertices Y"].default_value = 3
+            grid.inputs["Size X"].default_value = 4.0
+            grid.inputs["Size Y"].default_value = 4.0
+            object_info = group.nodes.new("GeometryNodeObjectInfo")
+            object_info.inputs["Object"].default_value = cube
+            instance_on_points = group.nodes.new("GeometryNodeInstanceOnPoints")
+            node_out = group.nodes.new("NodeGroupOutput")
+            group.links.new(grid.outputs["Mesh"], instance_on_points.inputs["Points"])
+            group.links.new(object_info.outputs["Geometry"], instance_on_points.inputs["Instance"])
+            group.links.new(instance_on_points.outputs["Instances"], node_out.inputs[0])
+            scatter.modifiers.new("GeometryNodes", 'NODES').node_group = group
+
+            # Instance a collection holding the cube with an empty.
+            # The light and the empty in it have no geometry and must be ignored.
+            collection = bpy.data.collections.new("Instanced")
+            collection.objects.link(cube)
+            collection.objects.link(bpy.data.objects["Light"])
+            nested_empty = bpy.data.objects.new("Nested Empty", None)
+            nested_empty.location = (-5.0, -5.0, -5.0)
+            collection.objects.link(nested_empty)
+            empty = bpy.data.objects.new("Collection Instance", None)
+            empty.instance_type = 'COLLECTION'
+            empty.instance_collection = collection
+            empty.location = (0.0, 20.0, 0.0)
+            scene.collection.objects.link(empty)
+            result = {'ok': True}  # noqa: F841
+        self._test_tool("execute_blender_code", {
+            "code": _python_fn_body_as_string(code),
+        })
+        data = self._test_tool("get_object_geometry_summary", {"names": ["Scatter", "Collection Instance"]})
+        scatter, empty = data["objects"]
+
+        self.assertEqual(scatter["instance_count"], 9)
+        # The generator has no mesh of its own.
+        self.assertEqual(scatter["counts_evaluated"]["vertices"], 0)
+        for key, expected in (("min", (7.0, -3.0, -1.0)), ("max", (13.0, 3.0, 1.0))):
+            for value, expected_value in zip(scatter["bounds_world"][key], expected):
+                self.assertAlmostEqual(value, expected_value, places=5)
+
+        self.assertEqual(empty["instance_count"], 1)
+        self.assertIsNone(empty["counts_evaluated"])
+        for key, expected in (("min", (-1.0, 19.0, -1.0)), ("max", (1.0, 21.0, 1.0))):
+            for value, expected_value in zip(empty["bounds_world"][key], expected):
+                self.assertAlmostEqual(value, expected_value, places=5)
+
+    def test_get_object_geometry_summary_not_evaluated(self) -> None:
+        def code() -> None:
+            import bpy  # type: ignore[import-not-found]
+            scene = bpy.context.scene
+            mesh = bpy.data.meshes["Cube"]
+            unlinked = bpy.data.objects.new("Unlinked", mesh)
+            unlinked.location = (5.0, 5.0, 5.0)
+            excluded = bpy.data.collections.new("Excluded")
+            scene.collection.children.link(excluded)
+            excluded.objects.link(bpy.data.objects.new("In Excluded", mesh))
+            bpy.context.view_layer.layer_collection.children["Excluded"].exclude = True
+            result = {'ok': True}  # noqa: F841
+        self._test_tool("execute_blender_code", {
+            "code": _python_fn_body_as_string(code),
+        })
+        data = self._test_tool("get_object_geometry_summary", {"names": ["Unlinked", "In Excluded"]})
+        for obj in data["objects"]:
+            self.assertFalse(obj["is_evaluated"], obj["name"])
+            self.assertIsNone(obj["bounds_world"], obj["name"])
+            self.assertIsNone(obj["counts_evaluated"], obj["name"])
+            self.assertIsNone(obj["instance_count"], obj["name"])
+            # The mesh itself is still available.
+            self.assertEqual(obj["counts_original"]["vertices"], 8, obj["name"])
+
+    def test_get_object_geometry_summary_nodes_inputs(self) -> None:
+        def code() -> None:
+            import bpy  # type: ignore[import-not-found]
+            group = bpy.data.node_groups.new("Geometry Group", 'GeometryNodeTree')
+            group.interface.new_socket("Geometry", in_out='INPUT', socket_type='NodeSocketGeometry')
+            group.interface.new_socket("Size", in_out='INPUT', socket_type='NodeSocketFloat')
+            group.interface.new_socket("Target", in_out='INPUT', socket_type='NodeSocketObject')
+            group.interface.new_socket("Geometry", in_out='OUTPUT', socket_type='NodeSocketGeometry')
+            node_in = group.nodes.new("NodeGroupInput")
+            node_out = group.nodes.new("NodeGroupOutput")
+            group.links.new(node_in.outputs[0], node_out.inputs[0])
+            mod = bpy.data.objects["Cube"].modifiers.new("GeometryNodes", 'NODES')
+            mod.node_group = group
+            # Blender 5.2+ exposes the inputs as RNA, older versions as ID properties.
+            properties = getattr(mod, "properties", None)
+            for item in group.interface.items_tree:
+                if item.item_type != 'SOCKET' or item.in_out != 'INPUT':
+                    continue
+                value = {"Size": 2.5, "Target": bpy.data.objects["Camera"]}.get(item.name)
+                if value is None:
+                    continue
+                if properties is not None:
+                    getattr(properties.inputs, item.identifier).value = value
+                else:
+                    mod[item.identifier] = value
+            result = {'ok': True}  # noqa: F841
+        self._test_tool("execute_blender_code", {
+            "code": _python_fn_body_as_string(code),
+        })
+        data = self._test_tool("get_object_geometry_summary", {"names": ["Cube"]})
+        modifier = data["objects"][0]["modifiers"][0]
+        self.assertEqual(modifier["type"], "NODES")
+        self.assertEqual(modifier["settings"]["node_group"], "Geometry Group")
+        inputs = {i["name"]: i for i in modifier["inputs"]}
+        # The geometry input is not listed.
+        self.assertEqual(sorted(inputs), ["Size", "Target"])
+        self.assertAlmostEqual(inputs["Size"]["value"], 2.5)
+        self.assertEqual(inputs["Size"]["socket_type"], "NodeSocketFloat")
+        self.assertEqual(inputs["Target"]["value"], "Camera")
+
     def test_get_scene_render_summary(self) -> None:
         data = self._test_tool("get_scene_render_summary")
         self.assertEqual(data["status"], "ok")

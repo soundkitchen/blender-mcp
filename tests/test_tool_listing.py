@@ -248,6 +248,49 @@ EXPECTED_TOOLS = [
         }
     },
     {
+        "name": "get_object_geometry_summary",
+        "description": "\n"
+        "Return world-space bounds, element counts and modifier settings of the objects in *names*.\n"
+        "\n"
+        "Use to check sizes, overlaps and contact between objects, and how\n"
+        "modifiers shape them, before changing anything.\n"
+        "\n"
+        "``bounds_world`` holds the ``min``, ``max`` and ``size`` of the\n"
+        "axis-aligned world-space box around the geometry after modifiers\n"
+        "(as shown in the viewport) and the instances with geometry the object\n"
+        "generates (e.g. with Geometry Nodes or collection instancing, measured\n"
+        "by their rotated local boxes), ``None`` for objects without geometry.\n"
+        "``instance_count`` is the number of those instances (instanced lights,\n"
+        "cameras and empties are not counted).\n"
+        "``counts_original`` (mesh objects only) and ``counts_evaluated``\n"
+        "(after modifiers, instances not included) hold the number of vertices,\n"
+        "edges, faces and triangles. In Edit Mode, ``counts_original`` may not\n"
+        "include unsynced edits.\n"
+        "``is_evaluated`` is false for objects outside the view layer (e.g. not\n"
+        "linked to the scene or in an excluded collection), their\n"
+        "``bounds_world``, ``counts_evaluated`` and ``instance_count`` are ``None``.\n"
+        "``modifiers`` lists each modifier with its visibility flags and\n"
+        "``settings`` (all editable properties, data-blocks by name).\n"
+        "Geometry Nodes modifiers also list their group ``inputs`` by name.\n"
+        "Names that don't match an object are listed in ``not_found``.\n",
+        "inputSchema": {
+            "properties": {
+                "names": {
+                    "items": {
+                        "type": "string"
+                    },
+                    "title": "Names",
+                    "type": "array"
+                }
+            },
+            "required": [
+                "names"
+            ],
+            "title": "get_object_geometry_summaryArguments",
+            "type": "object"
+        }
+    },
+    {
         "name": "get_objects_summary",
         "description": "\n"
         "Return the scene's collection hierarchy and their objects.\n"
