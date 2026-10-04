@@ -763,6 +763,129 @@ class _TestServerMixin:
             ],
         })
 
+    def test_get_scene_render_summary(self) -> None:
+        data = self._test_tool("get_scene_render_summary")
+        self.assertEqual(data["status"], "ok")
+        self.assertEqual(data["scene_name"], "Scene")
+
+        render = data["render"]
+        assert isinstance(render, dict)
+        self.assertEqual(render["engine"], "BLENDER_EEVEE")
+        self.assertEqual(render["samples"], render["engine_settings"]["taa_render_samples"])
+        self.assertEqual(render["resolution"], [1920, 1080])
+        self.assertEqual(render["resolution_percentage"], 100)
+
+        self.assertEqual(data["color_management"]["view_transform"], "AgX")
+
+        world = data["world"]
+        assert isinstance(world, dict)
+        self.assertEqual(world["name"], "World")
+        self.assertEqual([b["node"] for b in world["background"]], ["Background"])
+        self.assertIsNone(world["background"][0]["color_linked_from"])
+        self.assertEqual(world["environment_textures"], [])
+
+        lights = data["lights"]
+        assert isinstance(lights, list)
+        self.assertEqual([light["name"] for light in lights], ["Light"])
+        self.assertEqual(lights[0]["type"], "POINT")
+        self.assertIn("shadow_soft_size", lights[0])
+        self.assertIsNone(lights[0]["direction"])
+        self.assertTrue(lights[0]["visible"])
+
+        camera = data["camera"]
+        assert isinstance(camera, dict)
+        self.assertEqual(camera["name"], "Camera")
+        self.assertEqual(camera["type"], "PERSP")
+        self.assertAlmostEqual(camera["lens"], 50.0)
+        self.assertFalse(camera["dof"]["use_dof"])
+
+    def test_get_scene_render_summary_variants(self) -> None:
+        def code() -> None:
+            import bpy  # type: ignore[import-not-found]
+            scene = bpy.context.scene
+            scene.render.engine = 'CYCLES'
+            scene.cycles.samples = 32
+            scene.view_settings.view_transform = 'Standard'
+
+            # World: environment texture feeding one of two mixed backgrounds.
+            world = scene.world
+            tree = world.node_tree
+            output = tree.get_output_node('ALL')
+            bg_a = tree.nodes["Background"]
+            bg_b = tree.nodes.new("ShaderNodeBackground")
+            bg_b.name = "Background Env"
+            env = tree.nodes.new("ShaderNodeTexEnvironment")
+            env.image = bpy.data.images.new("EnvImage", 4, 2)
+            tree.links.new(env.outputs["Color"], bg_b.inputs["Color"])
+            mix = tree.nodes.new("ShaderNodeMixShader")
+            tree.links.new(bg_a.outputs["Background"], mix.inputs[1])
+            tree.links.new(bg_b.outputs["Background"], mix.inputs[2])
+            tree.links.new(mix.outputs["Shader"], output.inputs["Surface"])
+            # Not connected to the output, must not be listed as a background.
+            tree.nodes.new("ShaderNodeBackground").name = "Background Unused"
+
+            # A sun hidden from rendering and a rectangular area light.
+            sun = bpy.data.objects.new("Sun", bpy.data.lights.new("Sun", 'SUN'))
+            sun.hide_render = True
+            area_data = bpy.data.lights.new("Area", 'AREA')
+            area_data.shape = 'RECTANGLE'
+            area_data.size_y = 2.0
+            area = bpy.data.objects.new("Area", area_data)
+            scene.collection.objects.link(sun)
+            scene.collection.objects.link(area)
+
+            cam = scene.camera.data
+            cam.dof.use_dof = True
+            cam.dof.focus_object = bpy.data.objects["Cube"]
+            result = {'ok': True}  # noqa: F841
+        self._test_tool("execute_blender_code", {
+            "code": _python_fn_body_as_string(code),
+        })
+        data = self._test_tool("get_scene_render_summary")
+
+        render = data["render"]
+        assert isinstance(render, dict)
+        self.assertEqual(render["engine"], "CYCLES")
+        self.assertEqual(render["samples"], 32)
+        self.assertNotIn("taa_render_samples", render["engine_settings"])
+        self.assertEqual(data["color_management"]["view_transform"], "Standard")
+
+        world = data["world"]
+        assert isinstance(world, dict)
+        background = {b["node"]: b for b in world["background"]}
+        self.assertEqual(sorted(background), ["Background", "Background Env"])
+        self.assertEqual(background["Background Env"]["color_linked_from"], "Environment Texture")
+        self.assertEqual(
+            [(t["node"], t["image"]) for t in world["environment_textures"]],
+            [("Environment Texture", "EnvImage")],
+        )
+
+        lights = {light["name"]: light for light in data["lights"]}
+        self.assertEqual(sorted(lights), ["Area", "Light", "Sun"])
+        self.assertTrue(lights["Sun"]["hide_render"])
+        self.assertIn("angle", lights["Sun"])
+        # Unrotated lights point down the -Z axis.
+        for value, expected in zip(lights["Sun"]["direction"], (0.0, 0.0, -1.0)):
+            self.assertAlmostEqual(value, expected, places=5)
+        self.assertEqual(lights["Area"]["shape"], "RECTANGLE")
+        self.assertAlmostEqual(lights["Area"]["size_y"], 2.0)
+
+        self.assertEqual(data["camera"]["dof"]["focus_object"], "Cube")
+
+    def test_get_scene_render_summary_no_world_or_camera(self) -> None:
+        self._test_tool("execute_blender_code", {
+            "code": (
+                "import bpy\n"
+                "bpy.context.scene.world = None\n"
+                "bpy.context.scene.camera = None\n"
+                "result = {'ok': True}\n"
+            ),
+        })
+        data = self._test_tool("get_scene_render_summary")
+        self.assertEqual(data["status"], "ok")
+        self.assertIsNone(data["world"])
+        self.assertIsNone(data["camera"])
+
     # -----------------------------------------------------------------
     # Navigation tools.
 

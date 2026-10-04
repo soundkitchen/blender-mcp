@@ -63,6 +63,10 @@ The tools exposed by the MCP server.
    Return the Blender Python API docs for *identifier*, or list modules
    matching a trailing-``*`` discovery pattern.
 
+``get_scene_render_summary``
+   Return the scene's render settings, color management, world, lights and
+   camera.
+
 ``get_screenshot_of_area_as_image``
    Take a screenshot of a single Blender area and return it as a PNG image.
 
