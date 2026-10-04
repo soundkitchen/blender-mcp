@@ -32,6 +32,8 @@ _RENDER_RESTORE_INTERVAL = 0.1
 _RENDER_RESTORE_PENDING_KEY = "_blmcp_render_restore_pending"
 # The number of the last output file.
 _RENDER_OUTPUT_INDEX_KEY = "_blmcp_render_output_index"
+# The set of output files that were read (returned as an image).
+_RENDER_OUTPUTS_READ_KEY = "_blmcp_render_outputs_read"
 
 
 def _render_file_as_image(
@@ -93,10 +95,14 @@ def _render_file_as_image(
     }
 
 
-def _render_outputs_remove_old(output_dir: str, output_prefix: str) -> None:
+def _render_outputs_remove_old(output_dir: str, output_prefix: str, outputs_read: set[str]) -> None:
     """
-    Remove the outputs of previous calls for *output_prefix*, except the most recent one,
-    as the deferred checker of that call may not have read it yet.
+    Remove the outputs of previous calls for *output_prefix* that were read,
+    except the newest of them (its path was returned to the caller).
+
+    Outputs that were not read are kept, as the deferred checker of their call
+    may still be waiting (e.g. while other renders run).
+    *outputs_read* is updated to remove the paths of the removed outputs.
     """
     import os
     import re
@@ -109,11 +115,16 @@ def _render_outputs_remove_old(output_dir: str, output_prefix: str) -> None:
         for filename in os.listdir(output_dir)
         if (m := pattern.match(filename)) is not None
     )
-    for _index, filename in outputs[:-1]:
+    outputs_read_sorted = [
+        filepath for filepath in (os.path.join(output_dir, filename) for _index, filename in outputs)
+        if filepath in outputs_read
+    ]
+    for filepath in outputs_read_sorted[:-1]:
         try:
-            os.remove(os.path.join(output_dir, filename))
+            os.remove(filepath)
         except OSError:
-            pass
+            continue
+        outputs_read.discard(filepath)
 
 
 def _render_as_image(
@@ -127,6 +138,7 @@ def _render_as_image(
 
     *output_prefix* names the output file, a number is appended for each call,
     so calls never read or remove the output of another call.
+    Outputs of previous calls are removed once read (see ``_render_outputs_remove_old``).
     *obj_attrs* are additional temporary settings as ``(obj, {attr: value, ...})`` pairs.
 
     In background mode the render completes before returning a result ``dict``.
@@ -163,7 +175,8 @@ def _render_as_image(
     output_index = namespace.get(_RENDER_OUTPUT_INDEX_KEY, 0) + 1
     namespace[_RENDER_OUTPUT_INDEX_KEY] = output_index
     output_path = os.path.join(output_dir, "{:s}_{:d}.png".format(output_prefix, output_index))
-    _render_outputs_remove_old(output_dir, output_prefix)
+    outputs_read: set[str] = namespace.setdefault(_RENDER_OUTPUTS_READ_KEY, set())
+    _render_outputs_remove_old(output_dir, output_prefix, outputs_read)
 
     rd = bpy.context.scene.render
     obj_attrs = [
@@ -249,6 +262,7 @@ def _render_as_image(
             result = {"status": "error", "message": "Render completed but output file was not created"}
         else:
             result = _render_file_as_image(output_path, size_limit_in_bytes, info, time_start)
+            outputs_read.add(output_path)
         return with_restore_failed(result)
 
     if not use_deferred:

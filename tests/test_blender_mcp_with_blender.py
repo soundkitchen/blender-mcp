@@ -1008,18 +1008,30 @@ class _TestServerMixin:
         self.assertNotIn("image", [item.get("type") for item in content])
 
     def test_render_viewport_as_image_outputs(self) -> None:
-        """Each call writes its own output, older outputs are removed (keeping the previous one)."""
+        """
+        Each call writes its own output. Outputs that were read are removed
+        (keeping the newest), outputs that were not read are kept.
+        """
         self._set_cycles_cpu()
         self._set_render_small()
         filepaths = [
             str(self._call_tool_render_as_image("render_viewport_as_image")[1]["filepath"])
-            for _ in range(3)
+            for _ in range(2)
         ]
+        # An output whose deferred checker has not read it yet (not possible to
+        # reproduce in background mode, so write a file in its place).
+        filepath_unread = os.path.join(os.path.dirname(filepaths[0]), "render_viewport_as_image_0.png")
+        self._test_tool("execute_blender_code", {
+            "code": "import shutil\nshutil.copyfile({!r}, {!r})\nresult = {{}}\n".format(filepaths[1], filepath_unread),
+        })
+        filepaths.append(str(self._call_tool_render_as_image("render_viewport_as_image")[1]["filepath"]))
         self.assertEqual(len(set(filepaths)), 3)
         data = self._test_tool("execute_blender_code", {
-            "code": "import os\nresult = {{'exists': [os.path.exists(f) for f in {!r}]}}\n".format(filepaths),
+            "code": "import os\nresult = {{'exists': [os.path.exists(f) for f in {!r}]}}\n".format(
+                [*filepaths, filepath_unread],
+            ),
         })
-        self.assertEqual(data["exists"], [False, True, True])
+        self.assertEqual(data["exists"], [False, True, True, True])
 
     def test_render_viewport_as_image_multiview(self) -> None:
         """A multi-view (stereo) render writes a file for each view, it must still return an image."""
