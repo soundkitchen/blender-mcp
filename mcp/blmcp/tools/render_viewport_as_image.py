@@ -26,7 +26,7 @@ def register(mcp: MCPServer) -> None:
     @mcp.tool(
         annotations=ToolAnnotations(
             title="Render Viewport as Image",
-            read_only_hint=True,
+            destructive_hint=True,
         )
     )
     def render_viewport_as_image(size_limit_in_bytes: int = 0) -> tuple[Image, str]:
@@ -40,7 +40,8 @@ def register(mcp: MCPServer) -> None:
         Returns the image followed by JSON render info: ``filepath``
         (the full resolution render), ``image_width`` & ``image_height``
         (of the returned image), ``render_width`` & ``render_height``,
-        ``engine`` and ``render_time_seconds`` (approximate).
+        ``engine``, ``render_time_seconds`` (approximate), and ``restore_failed``
+        when some temporarily overridden settings could not be restored.
         Fails when another render is running.
 
         *size_limit_in_bytes* is the target image size in bytes.

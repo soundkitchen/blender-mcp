@@ -36,8 +36,9 @@ def register(mcp: MCPServer) -> None:
         Fast enough to check the result of each change visually.
         Returns the image followed by JSON render info: ``filepath``,
         ``image_width`` & ``image_height`` (of the returned image),
-        ``render_width`` & ``render_height``, ``engine`` and
-        ``render_time_seconds`` (approximate).
+        ``render_width`` & ``render_height``, ``engine``,
+        ``render_time_seconds`` (approximate), and ``restore_failed``
+        when some temporarily overridden settings could not be restored.
         Fails when another render is running.
 
         *size_limit_in_bytes* is the target image size in bytes.

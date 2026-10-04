@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# Inline `_render_as_image` & `_render_file_as_image`.
+# Inline `_render_as_image`, `_render_file_as_image` & `_render_outputs_remove_old`.
 #
 # Requires `_image_downscale_to_size_limit`,
 # include `_template_image_downscale_to_size_limit.py` as well.
@@ -26,6 +26,12 @@ _RENDER_IMAGE_DIMS_MAX = 2048
 
 # Interval for restoring the settings once a render job finishes.
 _RENDER_RESTORE_INTERVAL = 0.1
+
+# Keys in `bpy.app.driver_namespace`, shared between calls.
+# The restore function of a render whose settings are not restored yet.
+_RENDER_RESTORE_PENDING_KEY = "_blmcp_render_restore_pending"
+# The number of the last output file.
+_RENDER_OUTPUT_INDEX_KEY = "_blmcp_render_output_index"
 
 
 def _render_file_as_image(
@@ -87,15 +93,40 @@ def _render_file_as_image(
     }
 
 
+def _render_outputs_remove_old(output_dir: str, output_prefix: str) -> None:
+    """
+    Remove the outputs of previous calls for *output_prefix*, except the most recent one,
+    as the deferred checker of that call may not have read it yet.
+    """
+    import os
+    import re
+
+    if not os.path.isdir(output_dir):
+        return
+    pattern = re.compile(r"^" + re.escape(output_prefix) + r"_(\d+)\.png$")
+    outputs = sorted(
+        (int(m.group(1)), filename)
+        for filename in os.listdir(output_dir)
+        if (m := pattern.match(filename)) is not None
+    )
+    for _index, filename in outputs[:-1]:
+        try:
+            os.remove(os.path.join(output_dir, filename))
+        except OSError:
+            pass
+
+
 def _render_as_image(
-        output_name: str,
+        output_prefix: str,
         obj_attrs: list[tuple[object, dict[str, object]]],
         size_limit_in_bytes: int,
 ) -> dict[str, Any] | Callable[[], dict[str, Any] | None]:
     """
-    Render the current scene to *output_name* (in the MCP scratch directory)
-    as an 8-bit PNG, and return it as an image result (see ``_render_file_as_image``).
+    Render the current scene as an 8-bit PNG in the MCP scratch directory,
+    and return it as an image result (see ``_render_file_as_image``).
 
+    *output_prefix* names the output file, a number is appended for each call,
+    so calls never read or remove the output of another call.
     *obj_attrs* are additional temporary settings as ``(obj, {attr: value, ...})`` pairs.
 
     In background mode the render completes before returning a result ``dict``.
@@ -107,27 +138,38 @@ def _render_as_image(
     ``write_still`` reads the output settings after the render completes.
     They are restored by a timer as well as by the checker, so they are restored
     even when the client disconnects or times out.
+    Settings that could not be restored are reported as ``restore_failed``.
     """
     import os
     import time
     import bpy  # pylint: disable=import-error,no-name-in-module
 
     use_deferred = not bpy.app.background
+    namespace = bpy.app.driver_namespace
 
     # Starting a render while one is running is cancelled, and would store the
     # temporary settings of the running render as the values to restore.
     if bpy.app.is_job_running('RENDER'):
         return {"status": "error", "message": "Another render is running, try again once it completes"}
 
-    output_path = os.path.join(bpy.app.tempdir, "blender_mcp", output_name)
-    # Remove the previous output, so a cancelled or failed render is not reported as a success.
-    if os.path.exists(output_path):
-        os.remove(output_path)
+    # Complete the restore of a previous call that has not run yet (its client may have
+    # disconnected before its timer ran), otherwise its temporary settings would be
+    # stored as the values to restore.
+    restore_pending = namespace.pop(_RENDER_RESTORE_PENDING_KEY, None)
+    if restore_pending is not None:
+        restore_pending()
+
+    output_dir = os.path.join(bpy.app.tempdir, "blender_mcp")
+    output_index = namespace.get(_RENDER_OUTPUT_INDEX_KEY, 0) + 1
+    namespace[_RENDER_OUTPUT_INDEX_KEY] = output_index
+    output_path = os.path.join(output_dir, "{:s}_{:d}.png".format(output_prefix, output_index))
+    _render_outputs_remove_old(output_dir, output_prefix)
 
     rd = bpy.context.scene.render
     obj_attrs = [
         *obj_attrs,
-        (rd, {"filepath": output_path}),
+        # Multi-view (stereo) renders write a file for each view instead of `filepath`.
+        (rd, {"filepath": output_path, "use_multiview": False}),
         # The order matters: `media_type` limits the available `file_format` values.
         (rd.image_settings, {"media_type": 'IMAGE', "file_format": 'PNG', "color_depth": '8'}),
     ]
@@ -139,6 +181,7 @@ def _render_as_image(
         for obj, attrs in obj_attrs
         for attr in attrs
     ]
+    restore_failed: list[str] = []
     is_restored = False
 
     # Detect a cancelled render (e.g. pressing Escape) explicitly,
@@ -156,13 +199,28 @@ def _render_as_image(
         if is_restored:
             return
         is_restored = True
+        if namespace.get(_RENDER_RESTORE_PENDING_KEY) is restore:
+            del namespace[_RENDER_RESTORE_PENDING_KEY]
         if on_render_cancel in bpy.app.handlers.render_cancel:
             bpy.app.handlers.render_cancel.remove(on_render_cancel)
+        # Restore each setting even when another one fails
+        # (e.g. a value changed during the render made the stored value invalid).
         for obj, attr, value in restore_attrs:
             try:
                 setattr(obj, attr, value)
             except ReferenceError:
                 pass  # The data was freed (e.g. a different file was loaded).
+            except (AttributeError, RuntimeError, TypeError, ValueError) as ex:
+                restore_failed.append("{:s}: {:s}".format(attr, str(ex)))
+
+    def with_restore_failed(result: dict[str, Any]) -> dict[str, Any]:
+        if restore_failed:
+            result["restore_failed"] = list(restore_failed)
+            if result.get("status") != "ok":
+                result["message"] = "{:s} (settings not restored: {:s})".format(
+                    str(result.get("message")), "; ".join(restore_failed),
+                )
+        return result
 
     render_args = ('INVOKE_DEFAULT',) if use_deferred else ()
     try:
@@ -178,22 +236,26 @@ def _render_as_image(
         ret = bpy.ops.render.render(*render_args, write_still=True)
     except (RuntimeError, TypeError) as ex:
         restore()
-        return {"status": "error", "message": str(ex)}
+        return with_restore_failed({"status": "error", "message": str(ex)})
 
     if 'CANCELLED' in ret:
         restore()
-        return {"status": "error", "message": "Render was cancelled"}
+        return with_restore_failed({"status": "error", "message": "Render was cancelled"})
 
     def result_from_output() -> dict[str, Any]:
         if is_cancelled:
-            return {"status": "error", "message": "Render was cancelled"}
-        if not os.path.exists(output_path):
-            return {"status": "error", "message": "Render completed but output file was not created"}
-        return _render_file_as_image(output_path, size_limit_in_bytes, info, time_start)
+            result = {"status": "error", "message": "Render was cancelled"}
+        elif not os.path.exists(output_path):
+            result = {"status": "error", "message": "Render completed but output file was not created"}
+        else:
+            result = _render_file_as_image(output_path, size_limit_in_bytes, info, time_start)
+        return with_restore_failed(result)
 
     if not use_deferred:
         restore()
         return result_from_output()
+
+    namespace[_RENDER_RESTORE_PENDING_KEY] = restore
 
     def restore_when_finished() -> float | None:
         if bpy.app.is_job_running('RENDER'):

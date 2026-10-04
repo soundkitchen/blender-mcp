@@ -978,11 +978,9 @@ class _TestServerMixin:
         self.assertEqual(data["media_type"], "VIDEO")
         self.assertEqual(data["file_format"], "FFMPEG")
 
-    def test_render_viewport_as_image_error_removes_previous_output(self) -> None:
-        """A failed render must not return the image of a previous render."""
-        self._set_cycles_cpu()
-
-        def code_setup() -> None:
+    def _set_render_small(self) -> None:
+        """Use a small resolution and a single sample for fast renders."""
+        def code() -> None:
             import bpy  # type: ignore[import-not-found]
             rd = bpy.context.scene.render
             rd.resolution_x = 320
@@ -990,10 +988,14 @@ class _TestServerMixin:
             bpy.context.scene.cycles.samples = 1
             result = {'ok': True}  # noqa: F841
         self._test_tool("execute_blender_code", {
-            "code": _python_fn_body_as_string(code_setup),
+            "code": _python_fn_body_as_string(code),
         })
-        _image_data, info = self._call_tool_render_as_image("render_viewport_as_image")
-        filepath = str(info["filepath"])
+
+    def test_render_viewport_as_image_error_after_success(self) -> None:
+        """A failed render must not return the image of a previous render."""
+        self._set_cycles_cpu()
+        self._set_render_small()
+        self._call_tool_render_as_image("render_viewport_as_image")
 
         def code_remove_camera() -> None:
             import bpy  # type: ignore[import-not-found]
@@ -1002,11 +1004,43 @@ class _TestServerMixin:
         self._test_tool("execute_blender_code", {
             "code": _python_fn_body_as_string(code_remove_camera),
         })
-        self._call_tool_expect_error("render_viewport_as_image")
+        content = self._call_tool_expect_error("render_viewport_as_image")
+        self.assertNotIn("image", [item.get("type") for item in content])
+
+    def test_render_viewport_as_image_outputs(self) -> None:
+        """Each call writes its own output, older outputs are removed (keeping the previous one)."""
+        self._set_cycles_cpu()
+        self._set_render_small()
+        filepaths = [
+            str(self._call_tool_render_as_image("render_viewport_as_image")[1]["filepath"])
+            for _ in range(3)
+        ]
+        self.assertEqual(len(set(filepaths)), 3)
         data = self._test_tool("execute_blender_code", {
-            "code": "import os\nresult = {{'exists': os.path.exists({!r})}}\n".format(filepath),
+            "code": "import os\nresult = {{'exists': [os.path.exists(f) for f in {!r}]}}\n".format(filepaths),
         })
-        self.assertFalse(data["exists"])
+        self.assertEqual(data["exists"], [False, True, True])
+
+    def test_render_viewport_as_image_multiview(self) -> None:
+        """A multi-view (stereo) render writes a file for each view, it must still return an image."""
+        self._set_cycles_cpu()
+        self._set_render_small()
+
+        def code_setup() -> None:
+            import bpy  # type: ignore[import-not-found]
+            rd = bpy.context.scene.render
+            rd.use_multiview = True
+            rd.views_format = 'STEREO_3D'
+            rd.image_settings.views_format = 'INDIVIDUAL'
+            result = {'ok': True}  # noqa: F841
+        self._test_tool("execute_blender_code", {
+            "code": _python_fn_body_as_string(code_setup),
+        })
+        self._call_tool_render_as_image("render_viewport_as_image")
+        data = self._test_tool("execute_blender_code", {
+            "code": "import bpy\nresult = {'use_multiview': bpy.context.scene.render.use_multiview}\n",
+        })
+        self.assertTrue(data["use_multiview"])
 
     # -----------------------------------------------------------------
     # Deferred tool response.

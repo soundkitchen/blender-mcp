@@ -15,8 +15,8 @@ __all__ = (
 from collections.abc import Callable
 from typing import Any, NamedTuple
 
-# Written inside the MCP scratch directory, overwritten on each call.
-_OUTPUT_NAME = "render_thumbnail_as_image.png"
+# Prefix of the output file in the MCP scratch directory (see `_render_as_image`).
+_OUTPUT_PREFIX = "render_thumbnail_as_image"
 
 
 class Params(NamedTuple):
@@ -33,6 +33,7 @@ class Result(NamedTuple):
     render_height: int | None = None
     engine: str | None = None
     render_time_seconds: float | None = None
+    restore_failed: list[str] | None = None
     message: str | None = None
 
 
@@ -53,7 +54,7 @@ def _image_downscale_to_size_limit(
 
 # @include_begin: _template_render_result_as_image.py
 def _render_as_image(
-        output_name: str,
+        output_prefix: str,
         obj_attrs: list[tuple[object, dict[str, object]]],
         size_limit_in_bytes: int,
 ) -> dict[str, Any] | Callable[[], dict[str, Any] | None]:
@@ -65,7 +66,7 @@ def main(params: Params) -> Result | Callable[[], dict[str, Any] | None]:
     import bpy  # pylint: disable=import-error,no-name-in-module
 
     obj_attrs = _render_thumbnail_overrides(bpy.context.scene)
-    result = _render_as_image(_OUTPUT_NAME, obj_attrs, params.size_limit_in_bytes)
+    result = _render_as_image(_OUTPUT_PREFIX, obj_attrs, params.size_limit_in_bytes)
     if callable(result):
         return result
     return Result(**result)
