@@ -39,10 +39,11 @@ def register(mcp: MCPServer) -> None:
 
         ``bounds_world`` holds the ``min``, ``max`` and ``size`` of the
         axis-aligned world-space box around the geometry after modifiers
-        (as shown in the viewport) and the instances the object generates
-        (e.g. with Geometry Nodes or collection instancing, measured by their
-        rotated local boxes), ``None`` for objects without geometry.
-        ``instance_count`` is the number of those instances.
+        (as shown in the viewport) and the instances with geometry the object
+        generates (e.g. with Geometry Nodes or collection instancing, measured
+        by their rotated local boxes), ``None`` for objects without geometry.
+        ``instance_count`` is the number of those instances (instanced lights,
+        cameras and empties are not counted).
         ``counts_original`` (mesh objects only) and ``counts_evaluated``
         (after modifiers, instances not included) hold the number of vertices,
         edges, faces and triangles. In Edit Mode, ``counts_original`` may not

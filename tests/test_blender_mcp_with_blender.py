@@ -853,8 +853,13 @@ class _TestServerMixin:
             scatter.modifiers.new("GeometryNodes", 'NODES').node_group = group
 
             # Instance a collection holding the cube with an empty.
+            # The light and the empty in it have no geometry and must be ignored.
             collection = bpy.data.collections.new("Instanced")
             collection.objects.link(cube)
+            collection.objects.link(bpy.data.objects["Light"])
+            nested_empty = bpy.data.objects.new("Nested Empty", None)
+            nested_empty.location = (-5.0, -5.0, -5.0)
+            collection.objects.link(nested_empty)
             empty = bpy.data.objects.new("Collection Instance", None)
             empty.instance_type = 'COLLECTION'
             empty.instance_collection = collection
