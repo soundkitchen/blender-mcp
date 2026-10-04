@@ -39,11 +39,17 @@ def register(mcp: MCPServer) -> None:
 
         ``bounds_world`` holds the ``min``, ``max`` and ``size`` of the
         axis-aligned world-space box around the geometry after modifiers
-        (as shown in the viewport), ``None`` for objects without geometry.
+        (as shown in the viewport) and the instances the object generates
+        (e.g. with Geometry Nodes or collection instancing, measured by their
+        rotated local boxes), ``None`` for objects without geometry.
+        ``instance_count`` is the number of those instances.
         ``counts_original`` (mesh objects only) and ``counts_evaluated``
-        (after modifiers) hold the number of vertices, edges, faces and
-        triangles. In Edit Mode, ``counts_original`` may not include
-        unsynced edits.
+        (after modifiers, instances not included) hold the number of vertices,
+        edges, faces and triangles. In Edit Mode, ``counts_original`` may not
+        include unsynced edits.
+        ``is_evaluated`` is false for objects outside the view layer (e.g. not
+        linked to the scene or in an excluded collection), their
+        ``bounds_world``, ``counts_evaluated`` and ``instance_count`` are ``None``.
         ``modifiers`` lists each modifier with its visibility flags and
         ``settings`` (all editable properties, data-blocks by name).
         Geometry Nodes modifiers also list their group ``inputs`` by name.
