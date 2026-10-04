@@ -15,15 +15,7 @@ __all__ = (
 import contextlib
 import typing
 from collections.abc import Callable
-from typing import NamedTuple
-
-# Thumbnail render settings. Small resolution and low samples
-# for a fast preview that is still useful for visual inspection.
-# The longest dimension is clamped to this value, preserving aspect ratio.
-_THUMB_DIMS_MAX = 320
-_THUMB_SIMPLIFY_SUBDIV = 1
-_THUMB_CYCLES_SAMPLES = 16
-_THUMB_EEVEE_SAMPLES = 16
+from typing import Any, NamedTuple
 
 
 class Params(NamedTuple):
@@ -42,6 +34,12 @@ def _backup_attrs_and_assign_multi(
         *obj_attrs: tuple[object, dict[str, object]],
 ) -> typing.Generator[None, None, None]:
     yield
+# @include_end
+
+
+# @include_begin: _template_render_thumbnail_overrides.py
+def _render_thumbnail_overrides(scene: Any) -> list[tuple[object, dict[str, object]]]:
+    return []
 # @include_end
 
 
@@ -67,16 +65,6 @@ def main(params: Params) -> Result | Callable[[], dict[str, object] | None]:
     scene = bpy.context.scene
     rd = scene.render
 
-    # Compute thumbnail resolution from originals, preserving aspect ratio.
-    res_x = rd.resolution_x
-    res_y = rd.resolution_y
-    if res_x >= res_y:
-        thumb_x = _THUMB_DIMS_MAX
-        thumb_y = max(int(res_y * _THUMB_DIMS_MAX / res_x), 1)
-    else:
-        thumb_y = _THUMB_DIMS_MAX
-        thumb_x = max(int(res_x * _THUMB_DIMS_MAX / res_y), 1)
-
     # NOTE: `filepath` is excluded from `_backup_attrs_and_assign_multi`
     # because `write_still` reads it after the render completes. With
     # `INVOKE_DEFAULT` the context manager would restore it before the
@@ -84,20 +72,7 @@ def main(params: Params) -> Result | Callable[[], dict[str, object] | None]:
     orig_filepath = rd.filepath
     rd.filepath = output_path
 
-    obj_attrs: list[tuple[object, dict[str, object]]] = [
-        (rd, {
-            "resolution_x": thumb_x,
-            "resolution_y": thumb_y,
-            "resolution_percentage": 100,
-            "use_simplify": True,
-            "simplify_subdivision_render": _THUMB_SIMPLIFY_SUBDIV,
-        }),
-    ]
-    if rd.engine == "CYCLES":
-        obj_attrs.append((scene.cycles, {"samples": _THUMB_CYCLES_SAMPLES}))
-    elif rd.engine in ("BLENDER_EEVEE_NEXT", "BLENDER_EEVEE"):
-        # NOTE: keep EEVEE engine IDs in sync with `get_blendfile_summary_usage_guess_toolcode.py`.
-        obj_attrs.append((scene.eevee, {"taa_render_samples": _THUMB_EEVEE_SAMPLES}))
+    obj_attrs = _render_thumbnail_overrides(scene)
 
     render_args = ('INVOKE_DEFAULT',) if use_deferred else ()
 

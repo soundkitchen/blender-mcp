@@ -850,6 +850,210 @@ class _TestServerMixin:
         self.assertTrue(data["filepath"].endswith("render.png"))
         self._assert_valid_png(data["filepath"])
 
+    def _call_tool_render_as_image(
+        self,
+        name: str,
+        arguments: dict[str, object] | None = None,
+    ) -> tuple[bytes, dict[str, object]]:
+        """
+        Call a ``render_*_as_image`` tool, return the PNG bytes and the render info.
+        """
+        content = self._call_tool(name, arguments)
+        self.assertEqual(len(content), 2)
+        self.assertEqual(content[0].get("type"), "image")
+        self.assertEqual(content[1].get("type"), "text")
+        image_data = base64.b64decode(str(content[0].get("data", "")))
+        self.assertEqual(image_data[:8], b"\x89PNG\r\n\x1a\n")
+        info = json.loads(str(content[1]["text"]))
+        self.assertEqual(
+            self._image_size(str(content[0]["data"])),
+            (info["image_width"], info["image_height"]),
+        )
+        self.assertIsInstance(info["render_time_seconds"], float)
+        self.assertTrue(str(info["filepath"]).endswith(".png"))
+        self._assert_valid_png(str(info["filepath"]))
+        return image_data, info
+
+    def test_render_thumbnail_as_image(self) -> None:
+        self._set_cycles_cpu()
+
+        def code_setup() -> None:
+            import bpy  # type: ignore[import-not-found]
+            # A non-PNG output format must not affect the returned image.
+            bpy.context.scene.render.image_settings.file_format = 'OPEN_EXR'
+            result = {'ok': True}  # noqa: F841
+        self._test_tool("execute_blender_code", {
+            "code": _python_fn_body_as_string(code_setup),
+        })
+        _image_data, info = self._call_tool_render_as_image("render_thumbnail_as_image")
+        self.assertEqual(info["engine"], "CYCLES")
+        # The longest dimension is clamped (default 1920x1080 -> 320x180).
+        self.assertEqual((info["render_width"], info["render_height"]), (320, 180))
+        self.assertEqual((info["image_width"], info["image_height"]), (320, 180))
+
+        def code_check() -> None:
+            import bpy  # type: ignore[import-not-found]
+            rd = bpy.context.scene.render
+            result = {  # noqa: F841
+                'file_format': rd.image_settings.file_format,
+                'resolution': [rd.resolution_x, rd.resolution_y],
+                'samples': bpy.context.scene.cycles.samples,
+            }
+        data = self._test_tool("execute_blender_code", {
+            "code": _python_fn_body_as_string(code_check),
+        })
+        self.assertEqual(data["file_format"], "OPEN_EXR")
+        self.assertEqual(data["resolution"], [1920, 1080])
+        self.assertNotEqual(data["samples"], 16)
+
+    def test_render_viewport_as_image_size_limit(self) -> None:
+        self._set_cycles_cpu()
+
+        def code_setup() -> None:
+            import bpy  # type: ignore[import-not-found]
+            rd = bpy.context.scene.render
+            rd.resolution_x = 640
+            rd.resolution_y = 480
+            bpy.context.scene.cycles.samples = 4
+            result = {'ok': True}  # noqa: F841
+        self._test_tool("execute_blender_code", {
+            "code": _python_fn_body_as_string(code_setup),
+        })
+        size_limit = 16 * 1024  # 16 KB.
+        image_data, info = self._call_tool_render_as_image("render_viewport_as_image", {
+            "size_limit_in_bytes": size_limit,
+        })
+        self.assertLessEqual(len(image_data), size_limit)
+        self.assertEqual((info["render_width"], info["render_height"]), (640, 480))
+        self.assertLess(int(str(info["image_width"])), 640)
+
+    def test_render_viewport_as_image_dims_max(self) -> None:
+        self._set_cycles_cpu()
+
+        def code_setup() -> None:
+            import bpy  # type: ignore[import-not-found]
+            rd = bpy.context.scene.render
+            rd.resolution_x = 2560
+            rd.resolution_y = 1440
+            bpy.context.scene.cycles.samples = 1
+            result = {'ok': True}  # noqa: F841
+        self._test_tool("execute_blender_code", {
+            "code": _python_fn_body_as_string(code_setup),
+        })
+        _image_data, info = self._call_tool_render_as_image("render_viewport_as_image")
+        self.assertEqual((info["render_width"], info["render_height"]), (2560, 1440))
+        self.assertLessEqual(max(int(str(info["image_width"])), int(str(info["image_height"]))), 2048)
+
+    def test_render_viewport_as_image_video_output(self) -> None:
+        """A video output (where PNG is not an available format) is restored after rendering."""
+        self._set_cycles_cpu()
+
+        def code_setup() -> None:
+            import bpy  # type: ignore[import-not-found]
+            rd = bpy.context.scene.render
+            rd.resolution_x = 320
+            rd.resolution_y = 240
+            bpy.context.scene.cycles.samples = 1
+            rd.filepath = "//custom_output_"
+            rd.image_settings.media_type = 'VIDEO'
+            rd.image_settings.file_format = 'FFMPEG'
+            result = {'ok': True}  # noqa: F841
+        self._test_tool("execute_blender_code", {
+            "code": _python_fn_body_as_string(code_setup),
+        })
+        self._call_tool_render_as_image("render_viewport_as_image")
+
+        def code_check() -> None:
+            import bpy  # type: ignore[import-not-found]
+            rd = bpy.context.scene.render
+            result = {  # noqa: F841
+                'filepath': rd.filepath,
+                'media_type': rd.image_settings.media_type,
+                'file_format': rd.image_settings.file_format,
+            }
+        data = self._test_tool("execute_blender_code", {
+            "code": _python_fn_body_as_string(code_check),
+        })
+        self.assertEqual(data["filepath"], "//custom_output_")
+        self.assertEqual(data["media_type"], "VIDEO")
+        self.assertEqual(data["file_format"], "FFMPEG")
+
+    def _set_render_small(self) -> None:
+        """Use a small resolution and a single sample for fast renders."""
+        def code() -> None:
+            import bpy  # type: ignore[import-not-found]
+            rd = bpy.context.scene.render
+            rd.resolution_x = 320
+            rd.resolution_y = 240
+            bpy.context.scene.cycles.samples = 1
+            result = {'ok': True}  # noqa: F841
+        self._test_tool("execute_blender_code", {
+            "code": _python_fn_body_as_string(code),
+        })
+
+    def test_render_viewport_as_image_error_after_success(self) -> None:
+        """A failed render must not return the image of a previous render."""
+        self._set_cycles_cpu()
+        self._set_render_small()
+        self._call_tool_render_as_image("render_viewport_as_image")
+
+        def code_remove_camera() -> None:
+            import bpy  # type: ignore[import-not-found]
+            bpy.data.objects.remove(bpy.data.objects["Camera"], do_unlink=True)
+            result = {'ok': True}  # noqa: F841
+        self._test_tool("execute_blender_code", {
+            "code": _python_fn_body_as_string(code_remove_camera),
+        })
+        content = self._call_tool_expect_error("render_viewport_as_image")
+        self.assertNotIn("image", [item.get("type") for item in content])
+
+    def test_render_viewport_as_image_outputs(self) -> None:
+        """
+        Each call writes its own output. Outputs that were read are removed
+        (keeping the newest), outputs that were not read are kept.
+        """
+        self._set_cycles_cpu()
+        self._set_render_small()
+        filepaths = [
+            str(self._call_tool_render_as_image("render_viewport_as_image")[1]["filepath"])
+            for _ in range(2)
+        ]
+        # An output whose deferred checker has not read it yet (not possible to
+        # reproduce in background mode, so write a file in its place).
+        filepath_unread = os.path.join(os.path.dirname(filepaths[0]), "render_viewport_as_image_0.png")
+        self._test_tool("execute_blender_code", {
+            "code": "import shutil\nshutil.copyfile({!r}, {!r})\nresult = {{}}\n".format(filepaths[1], filepath_unread),
+        })
+        filepaths.append(str(self._call_tool_render_as_image("render_viewport_as_image")[1]["filepath"]))
+        self.assertEqual(len(set(filepaths)), 3)
+        data = self._test_tool("execute_blender_code", {
+            "code": "import os\nresult = {{'exists': [os.path.exists(f) for f in {!r}]}}\n".format(
+                [*filepaths, filepath_unread],
+            ),
+        })
+        self.assertEqual(data["exists"], [False, True, True, True])
+
+    def test_render_viewport_as_image_multiview(self) -> None:
+        """A multi-view (stereo) render writes a file for each view, it must still return an image."""
+        self._set_cycles_cpu()
+        self._set_render_small()
+
+        def code_setup() -> None:
+            import bpy  # type: ignore[import-not-found]
+            rd = bpy.context.scene.render
+            rd.use_multiview = True
+            rd.views_format = 'STEREO_3D'
+            rd.image_settings.views_format = 'INDIVIDUAL'
+            result = {'ok': True}  # noqa: F841
+        self._test_tool("execute_blender_code", {
+            "code": _python_fn_body_as_string(code_setup),
+        })
+        self._call_tool_render_as_image("render_viewport_as_image")
+        data = self._test_tool("execute_blender_code", {
+            "code": "import bpy\nresult = {'use_multiview': bpy.context.scene.render.use_multiview}\n",
+        })
+        self.assertTrue(data["use_multiview"])
+
     # -----------------------------------------------------------------
     # Deferred tool response.
 

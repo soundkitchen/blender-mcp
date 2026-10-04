@@ -1,0 +1,63 @@
+# SPDX-FileCopyrightText: 2026 Blender Authors
+#
+# SPDX-License-Identifier: GPL-3.0-or-later
+
+"""
+Tool-code for rendering the current scene, returned as a PNG image.
+"""
+
+__all__ = (
+    "Params",
+    "Result",
+    "main",
+)
+
+from collections.abc import Callable
+from typing import Any, NamedTuple
+
+# Prefix of the output file in the MCP scratch directory (see `_render_as_image`).
+_OUTPUT_PREFIX = "render_viewport_as_image"
+
+
+class Params(NamedTuple):
+    size_limit_in_bytes: int = 0
+
+
+class Result(NamedTuple):
+    status: str
+    image_base64: str | None = None
+    filepath: str | None = None
+    image_width: int | None = None
+    image_height: int | None = None
+    render_width: int | None = None
+    render_height: int | None = None
+    engine: str | None = None
+    render_time_seconds: float | None = None
+    restore_failed: list[str] | None = None
+    message: str | None = None
+
+
+# @include_begin: _template_image_downscale_to_size_limit.py
+def _image_downscale_to_size_limit(
+        tmpdir: str, filepath: str, size_limit_in_bytes: int, size_tolerance_in_bytes: int = 0,
+        use_hidpi_downscale: bool = True,
+) -> bytes:
+    return b''
+# @include_end
+
+
+# @include_begin: _template_render_result_as_image.py
+def _render_as_image(
+        output_prefix: str,
+        obj_attrs: list[tuple[object, dict[str, object]]],
+        size_limit_in_bytes: int,
+) -> dict[str, Any] | Callable[[], dict[str, Any] | None]:
+    return {}
+# @include_end
+
+
+def main(params: Params) -> Result | Callable[[], dict[str, Any] | None]:
+    result = _render_as_image(_OUTPUT_PREFIX, [], params.size_limit_in_bytes)
+    if callable(result):
+        return result
+    return Result(**result)
