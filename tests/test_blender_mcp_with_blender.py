@@ -850,6 +850,83 @@ class _TestServerMixin:
         self.assertTrue(data["filepath"].endswith("render.png"))
         self._assert_valid_png(data["filepath"])
 
+    def _call_tool_render_as_image(
+        self,
+        name: str,
+        arguments: dict[str, object] | None = None,
+    ) -> tuple[bytes, dict[str, object]]:
+        """
+        Call a ``render_*_as_image`` tool, return the PNG bytes and the render info.
+        """
+        content = self._call_tool(name, arguments)
+        self.assertEqual(len(content), 2)
+        self.assertEqual(content[0].get("type"), "image")
+        self.assertEqual(content[1].get("type"), "text")
+        image_data = base64.b64decode(str(content[0].get("data", "")))
+        self.assertEqual(image_data[:8], b"\x89PNG\r\n\x1a\n")
+        info = json.loads(str(content[1]["text"]))
+        self.assertEqual(
+            self._image_size(str(content[0]["data"])),
+            (info["image_width"], info["image_height"]),
+        )
+        self.assertIsInstance(info["render_time_seconds"], float)
+        self.assertTrue(str(info["filepath"]).endswith(".png"))
+        self._assert_valid_png(str(info["filepath"]))
+        return image_data, info
+
+    def test_render_thumbnail_as_image(self) -> None:
+        self._set_cycles_cpu()
+
+        def code_setup() -> None:
+            import bpy  # type: ignore[import-not-found]
+            # A non-PNG output format must not affect the returned image.
+            bpy.context.scene.render.image_settings.file_format = 'OPEN_EXR'
+            result = {'ok': True}  # noqa: F841
+        self._test_tool("execute_blender_code", {
+            "code": _python_fn_body_as_string(code_setup),
+        })
+        _image_data, info = self._call_tool_render_as_image("render_thumbnail_as_image")
+        self.assertEqual(info["engine"], "CYCLES")
+        # The longest dimension is clamped (default 1920x1080 -> 320x180).
+        self.assertEqual((info["render_width"], info["render_height"]), (320, 180))
+        self.assertEqual((info["image_width"], info["image_height"]), (320, 180))
+
+        def code_check() -> None:
+            import bpy  # type: ignore[import-not-found]
+            rd = bpy.context.scene.render
+            result = {  # noqa: F841
+                'file_format': rd.image_settings.file_format,
+                'resolution': [rd.resolution_x, rd.resolution_y],
+                'samples': bpy.context.scene.cycles.samples,
+            }
+        data = self._test_tool("execute_blender_code", {
+            "code": _python_fn_body_as_string(code_check),
+        })
+        self.assertEqual(data["file_format"], "OPEN_EXR")
+        self.assertEqual(data["resolution"], [1920, 1080])
+        self.assertNotEqual(data["samples"], 16)
+
+    def test_render_viewport_as_image_size_limit(self) -> None:
+        self._set_cycles_cpu()
+
+        def code_setup() -> None:
+            import bpy  # type: ignore[import-not-found]
+            rd = bpy.context.scene.render
+            rd.resolution_x = 640
+            rd.resolution_y = 480
+            bpy.context.scene.cycles.samples = 4
+            result = {'ok': True}  # noqa: F841
+        self._test_tool("execute_blender_code", {
+            "code": _python_fn_body_as_string(code_setup),
+        })
+        size_limit = 16 * 1024  # 16 KB.
+        image_data, info = self._call_tool_render_as_image("render_viewport_as_image", {
+            "size_limit_in_bytes": size_limit,
+        })
+        self.assertLessEqual(len(image_data), size_limit)
+        self.assertEqual((info["render_width"], info["render_height"]), (640, 480))
+        self.assertLess(int(str(info["image_width"])), 640)
+
     # -----------------------------------------------------------------
     # Deferred tool response.
 

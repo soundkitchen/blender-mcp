@@ -504,6 +504,31 @@ EXPECTED_TOOLS = [
         }
     },
     {
+        "name": "render_thumbnail_as_image",
+        "description": "\n"
+        "Render a small, low-quality thumbnail and return it as a PNG image (temporarily overrides settings).\n"
+        "\n"
+        "Fast enough to check the result of each change visually.\n"
+        "Returns the image followed by JSON render info: ``filepath``,\n"
+        "``image_width`` & ``image_height`` (of the returned image),\n"
+        "``render_width`` & ``render_height``, ``engine`` and\n"
+        "``render_time_seconds`` (approximate).\n"
+        "\n"
+        "*size_limit_in_bytes* caps the image size in bytes.\n"
+        "Zero (the default) uses the MCP message size limit.\n",
+        "inputSchema": {
+            "properties": {
+                "size_limit_in_bytes": {
+                    "default": 0,
+                    "title": "Size Limit In Bytes",
+                    "type": "integer"
+                }
+            },
+            "title": "render_thumbnail_as_imageArguments",
+            "type": "object"
+        }
+    },
+    {
         "name": "render_thumbnail_to_path",
         "description": "\n"
         "Render a small, low-quality thumbnail to *output_path* (temporarily overrides settings).\n",
@@ -518,6 +543,33 @@ EXPECTED_TOOLS = [
                 "output_path"
             ],
             "title": "render_thumbnail_to_pathArguments",
+            "type": "object"
+        }
+    },
+    {
+        "name": "render_viewport_as_image",
+        "description": "\n"
+        "Render the current scene using current render settings and return it as a PNG image.\n"
+        "\n"
+        "Use to check the final look (materials, lighting, composition),\n"
+        "this can be slow depending on the render settings.\n"
+        "The image is downscaled when needed to fit *size_limit_in_bytes*.\n"
+        "Returns the image followed by JSON render info: ``filepath``\n"
+        "(the full resolution render), ``image_width`` & ``image_height``\n"
+        "(of the returned image), ``render_width`` & ``render_height``,\n"
+        "``engine`` and ``render_time_seconds`` (approximate).\n"
+        "\n"
+        "*size_limit_in_bytes* caps the image size in bytes.\n"
+        "Zero (the default) uses the MCP message size limit.\n",
+        "inputSchema": {
+            "properties": {
+                "size_limit_in_bytes": {
+                    "default": 0,
+                    "title": "Size Limit In Bytes",
+                    "type": "integer"
+                }
+            },
+            "title": "render_viewport_as_imageArguments",
             "type": "object"
         }
     },

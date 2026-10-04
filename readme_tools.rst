@@ -86,9 +86,17 @@ The tools exposed by the MCP server.
 ``jump_to_view3d_object_data_by_name``
    Move the 3D viewport to the object whose data block matches *name*.
 
+``render_thumbnail_as_image``
+   Render a small, low-quality thumbnail and return it as a PNG image
+   (temporarily overrides settings).
+
 ``render_thumbnail_to_path``
    Render a small, low-quality thumbnail to *output_path* (temporarily
    overrides settings).
+
+``render_viewport_as_image``
+   Render the current scene using current render settings and return it as
+   a PNG image.
 
 ``render_viewport_to_path``
    Render the current scene to *output_path* using current render settings.
