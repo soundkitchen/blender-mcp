@@ -71,6 +71,7 @@ def _usage_probability_for_rendering(data: Any, scene: Any) -> tuple[str, dict[s
     """
     del data
     signals: list[tuple[float, float]] = []
+    # NOTE: keep EEVEE engine IDs in sync with `render_thumbnail_to_path_toolcode.py`.
     signals.append((float(scene.render.engine not in ("BLENDER_EEVEE_NEXT", "BLENDER_EEVEE")), 0.5))
     # Blender's default output paths, indicating no intentional render setup.
     default_paths = ("/tmp/", "/tmp\\", "")

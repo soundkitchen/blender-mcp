@@ -654,7 +654,10 @@ class _TestServerMixin:
             ob.rotation_mode = 'QUATERNION'
             half = math.radians(45.0) / 2.0
             ob.rotation_quaternion = (math.cos(half), math.sin(half), 0.0, 0.0)
-            ob.scale = (2.0, 3.0, 4.0)
+            # Negative scale and delta rotation must not affect the result.
+            ob.scale = (-2.0, 3.0, 4.0)
+            ob.delta_rotation_euler = (0.0, 0.0, math.radians(90.0))
+            ob.delta_rotation_quaternion = (math.cos(math.radians(45.0)), 0.0, 0.0, math.sin(math.radians(45.0)))
             result = {'ok': True}  # noqa: F841
         self._test_tool("execute_blender_code", {
             "code": _python_fn_body_as_string(code),
@@ -679,6 +682,10 @@ class _TestServerMixin:
             ob.rotation_euler = (1.0, 2.0, 3.0)
             ob.rotation_mode = 'AXIS_ANGLE'
             ob.rotation_axis_angle = (math.radians(30.0), 0.0, 0.0, 1.0)
+            # Negative scale and delta rotation must not affect the result.
+            ob.scale = (-1.0, 1.0, 1.0)
+            ob.delta_rotation_euler = (0.0, 0.0, math.radians(90.0))
+            ob.delta_rotation_quaternion = (math.cos(math.radians(45.0)), 0.0, 0.0, math.sin(math.radians(45.0)))
             result = {'ok': True}  # noqa: F841
         self._test_tool("execute_blender_code", {
             "code": _python_fn_body_as_string(code),

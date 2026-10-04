@@ -226,7 +226,13 @@ EXPECTED_TOOLS = [
         "``rotation`` is always an Euler rotation in radians (in the object's\n"
         "Euler order, or ``XYZ`` when ``rotation_mode`` is not an Euler order).\n"
         "``rotation_quaternion`` (W, X, Y, Z) or ``rotation_axis_angle``\n"
-        "(angle, X, Y, Z) hold the native values for those modes.\n",
+        "(angle, X, Y, Z) hold the native values for those modes.\n"
+        "Delta transforms are not included.\n"
+        "\n"
+        "``rotation`` is for reading only: when changing the rotation, write to\n"
+        "the property that matches ``rotation_mode`` (``rotation_euler``,\n"
+        "``rotation_quaternion`` or ``rotation_axis_angle``), writes to the\n"
+        "other properties are ignored.\n",
         "inputSchema": {
             "properties": {
                 "name": {

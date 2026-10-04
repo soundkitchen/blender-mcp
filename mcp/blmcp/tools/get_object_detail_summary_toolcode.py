@@ -57,16 +57,22 @@ def main(params: Params) -> Result:
     # `rotation_euler` is only used when `rotation_mode` is an Euler order,
     # otherwise it holds a stale value. Always report a valid Euler rotation
     # and include the native values so callers know which property to write.
+    #
+    # Convert from the native values directly (not `matrix_basis`),
+    # so the result matches the Euler branch: no delta rotation, and
+    # unaffected by negative or zero scale.
+    from mathutils import Quaternion  # pylint: disable=import-error,no-name-in-module
+
     rotation_mode = obj.rotation_mode
     rotation_quaternion = None
     rotation_axis_angle = None
-    if rotation_mode in {'QUATERNION', 'AXIS_ANGLE'}:
-        # Decompose to ignore scale, then convert using the default XYZ order.
-        rotation = list(obj.matrix_basis.decompose()[1].to_euler('XYZ'))
-        if rotation_mode == 'QUATERNION':
-            rotation_quaternion = list(obj.rotation_quaternion)
-        else:
-            rotation_axis_angle = list(obj.rotation_axis_angle)
+    if rotation_mode == 'QUATERNION':
+        rotation = list(obj.rotation_quaternion.normalized().to_euler('XYZ'))
+        rotation_quaternion = list(obj.rotation_quaternion)
+    elif rotation_mode == 'AXIS_ANGLE':
+        angle, *axis = obj.rotation_axis_angle
+        rotation = list(Quaternion(axis, angle).to_euler('XYZ'))
+        rotation_axis_angle = list(obj.rotation_axis_angle)
     else:
         rotation = list(obj.rotation_euler)
 
