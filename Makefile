@@ -19,6 +19,8 @@ Targets
      List all tests:    make test_integration TESTS_LIST=1
      Run tests:         make test_integration TESTS=TestChatClient.test_name
      Multiple tests:    make test_integration TESTS="test_one test_two"
+   * build_addon:       Build the add-on into an installable zip under build/
+                        (requires BLENDER_BIN or blender in PATH).
    * format:            Auto-format Python sources with autopep8.
    * readme_update:     Regenerate the tools listing in readme_tools.rst.
 
@@ -103,6 +105,11 @@ ifdef TESTS_LIST
 else
 	$(PYTHON) tests/integration/test_blender_mcp_with_llm.py $(TESTS)
 endif
+
+build_addon:
+	@mkdir -p build
+	"$(or $(BLENDER_BIN),blender)" --command extension build \
+		--source-dir addon/blender_mcp_addon --output-dir build
 
 format:
 	@for d in mcp addon _misc tests chat_client; do \
