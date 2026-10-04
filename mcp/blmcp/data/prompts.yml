@@ -11,13 +11,24 @@ initial_instructions: |
 
   # Bundled Manuals
 
-  Reference documentation is bundled alongside this server as plain-text RST files.
-  Search and read them directly with standard text tools (grep, file read, etc.):
-    * `data/api/` - Blender Python API reference (RST files per module/class).
+  Reference documentation for the supported Blender version is bundled with this server.
+  Prefer it over prior knowledge - the Python API changes between releases
+  (renamed enum values, removed properties, changed operator arguments).
+
+  Access it through these tools:
+    * `get_python_api_docs` - look up a fully-qualified identifier
+      (e.g. `bpy.types.Object.rotation_mode`, `bpy.ops.mesh.primitive_cube_add`).
+      Use `*` or `bpy.*` to discover modules and namespaces.
+    * `search_api_docs` - full-text search over the Python API reference.
       Consult when writing or debugging `bpy` code: operator signatures, type
       properties, enum values, etc.
-    * `data/manual/` - Blender user manual (RST files mirroring the official manual structure).
+    * `search_manual_docs` - full-text search over the Blender user manual.
       Consult for conceptual explanations, workflow guidance, and feature overviews.
+
+  The docs are plain-text RST files inside the server package, under
+  `data/api/` (Python API reference) and `data/manual/` (user manual).
+  These paths are relative to the installed `blmcp` package, not the working directory;
+  use the tools above unless you know where the package is installed.
 
   # Executing Code
 

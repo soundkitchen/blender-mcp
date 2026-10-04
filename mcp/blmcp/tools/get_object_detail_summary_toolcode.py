@@ -25,6 +25,9 @@ class Result(NamedTuple):
     type: str | None = None
     location: list[float] | None = None
     rotation: list[float] | None = None
+    rotation_mode: str | None = None
+    rotation_quaternion: list[float] | None = None
+    rotation_axis_angle: list[float] | None = None
     scale: list[float] | None = None
     dimensions: list[float] | None = None
     parent: str | None = None
@@ -51,12 +54,37 @@ def main(params: Params) -> Result:
             ),
         )
 
+    # `rotation_euler` is only used when `rotation_mode` is an Euler order,
+    # otherwise it holds a stale value. Always report a valid Euler rotation
+    # and include the native values so callers know which property to write.
+    #
+    # Convert from the native values directly (not `matrix_basis`),
+    # so the result matches the Euler branch: no delta rotation, and
+    # unaffected by negative or zero scale.
+    from mathutils import Quaternion  # pylint: disable=import-error,no-name-in-module
+
+    rotation_mode = obj.rotation_mode
+    rotation_quaternion = None
+    rotation_axis_angle = None
+    if rotation_mode == 'QUATERNION':
+        rotation = list(obj.rotation_quaternion.normalized().to_euler('XYZ'))
+        rotation_quaternion = list(obj.rotation_quaternion)
+    elif rotation_mode == 'AXIS_ANGLE':
+        angle, *axis = obj.rotation_axis_angle
+        rotation = list(Quaternion(axis, angle).to_euler('XYZ'))
+        rotation_axis_angle = list(obj.rotation_axis_angle)
+    else:
+        rotation = list(obj.rotation_euler)
+
     return Result(
         status="ok",
         name=obj.name,
         type=obj.type,
         location=list(obj.location),
-        rotation=list(obj.rotation_euler),
+        rotation=rotation,
+        rotation_mode=rotation_mode,
+        rotation_quaternion=rotation_quaternion,
+        rotation_axis_angle=rotation_axis_angle,
         scale=list(obj.scale),
         dimensions=list(obj.dimensions),
         parent=obj.parent.name if obj.parent else None,
