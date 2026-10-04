@@ -100,11 +100,46 @@ def _color_management_info(scene: _Scene) -> dict[str, Any]:
     }
 
 
+def _active_links(socket: Any) -> list[Any]:
+    # Muted links pass nothing, the socket then uses its own value.
+    return [link for link in socket.links if not link.is_muted]
+
+
 def _linked_from(socket: Any) -> str | None:
-    return socket.links[0].from_node.name if socket.is_linked else None
+    """
+    Return the name of the node feeding *socket*, skipping Reroute nodes.
+    """
+    seen = set()
+    while True:
+        links = _active_links(socket)
+        if not links:
+            return None
+        node = links[0].from_node
+        if node.bl_idname != "NodeReroute":
+            return node.name
+        # Guard against Reroute cycles.
+        if node.name in seen:
+            return None
+        seen.add(node.name)
+        socket = node.inputs[0]
 
 
-def _world_info(world: _World | None) -> dict[str, Any] | None:
+def _world_output_target(engine: str) -> str:
+    """
+    Return the ``get_output_node`` target for *engine*.
+
+    An output targeting the engine takes precedence over one targeting all engines,
+    which is used as a fallback.
+    """
+    if engine == 'CYCLES':
+        return 'CYCLES'
+    # NOTE: keep EEVEE engine IDs in sync with `_template_render_thumbnail_overrides.py`.
+    if engine in ("BLENDER_EEVEE_NEXT", "BLENDER_EEVEE"):
+        return 'EEVEE'
+    return 'ALL'
+
+
+def _world_info(world: _World | None, engine: str) -> dict[str, Any] | None:
     if world is None:
         return None
 
@@ -112,9 +147,9 @@ def _world_info(world: _World | None) -> dict[str, Any] | None:
     environment_textures: list[dict[str, Any]] = []
     tree = world.node_tree
     if tree is not None:
-        # Collect the Background nodes that feed the active output,
+        # Collect the Background nodes that feed the output used by the engine,
         # following links upstream (e.g. through Mix Shader nodes).
-        output = tree.get_output_node('ALL')
+        output = tree.get_output_node(_world_output_target(engine))
         if output is not None:
             seen = set()
             stack = [output]
@@ -134,7 +169,7 @@ def _world_info(world: _World | None) -> dict[str, Any] | None:
                         "strength_linked_from": _linked_from(strength),
                     })
                 for socket in node.inputs:
-                    for link in socket.links:
+                    for link in _active_links(socket):
                         stack.append(link.from_node)
             background.sort(key=lambda b: b["node"])
 
@@ -247,7 +282,7 @@ def main(params: None) -> Result:
         scene_name=scene.name,
         render=_render_info(scene),
         color_management=_color_management_info(scene),
-        world=_world_info(scene.world),
+        world=_world_info(scene.world, scene.render.engine),
         lights=lights,
         camera=_camera_info(scene.camera),
     )

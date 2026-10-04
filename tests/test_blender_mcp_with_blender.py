@@ -872,6 +872,80 @@ class _TestServerMixin:
 
         self.assertEqual(data["camera"]["dof"]["focus_object"], "Cube")
 
+    def test_get_scene_render_summary_world_output_target(self) -> None:
+        def code_cycles_only() -> None:
+            import bpy  # type: ignore[import-not-found]
+            scene = bpy.context.scene
+            scene.render.engine = 'CYCLES'
+            # The only output targets Cycles, there is no output for all engines.
+            scene.world.node_tree.get_output_node('ALL').target = 'CYCLES'
+            result = {'ok': True}  # noqa: F841
+        self._test_tool("execute_blender_code", {
+            "code": _python_fn_body_as_string(code_cycles_only),
+        })
+        data = self._test_tool("get_scene_render_summary")
+        self.assertEqual([b["node"] for b in data["world"]["background"]], ["Background"])
+
+        def code_add_all_output() -> None:
+            import bpy  # type: ignore[import-not-found]
+            tree = bpy.context.scene.world.node_tree
+            output_all = tree.nodes.new("ShaderNodeOutputWorld")
+            output_all.target = 'ALL'
+            bg_all = tree.nodes.new("ShaderNodeBackground")
+            bg_all.name = "Background All"
+            tree.links.new(bg_all.outputs["Background"], output_all.inputs["Surface"])
+            result = {'ok': True}  # noqa: F841
+        self._test_tool("execute_blender_code", {
+            "code": _python_fn_body_as_string(code_add_all_output),
+        })
+        # The output targeting the engine takes precedence over the one for all engines.
+        data = self._test_tool("get_scene_render_summary")
+        self.assertEqual([b["node"] for b in data["world"]["background"]], ["Background"])
+
+        # Other engines fall back to the output for all engines.
+        self._test_tool("execute_blender_code", {
+            "code": (
+                "import bpy\n"
+                "bpy.context.scene.render.engine = 'BLENDER_EEVEE'\n"
+                "result = {'ok': True}\n"
+            ),
+        })
+        data = self._test_tool("get_scene_render_summary")
+        self.assertEqual([b["node"] for b in data["world"]["background"]], ["Background All"])
+
+    def test_get_scene_render_summary_world_muted_and_reroute(self) -> None:
+        def code() -> None:
+            import bpy  # type: ignore[import-not-found]
+            tree = bpy.context.scene.world.node_tree
+            output = tree.get_output_node('ALL')
+            bg = tree.nodes["Background"]
+
+            # The color comes through a Reroute node.
+            env = tree.nodes.new("ShaderNodeTexEnvironment")
+            reroute = tree.nodes.new("NodeReroute")
+            tree.links.new(env.outputs["Color"], reroute.inputs[0])
+            tree.links.new(reroute.outputs[0], bg.inputs["Color"])
+            # A muted link to the strength passes nothing.
+            value = tree.nodes.new("ShaderNodeValue")
+            tree.links.new(value.outputs[0], bg.inputs["Strength"]).is_muted = True
+
+            # A background behind a muted link does not reach the output.
+            bg_muted = tree.nodes.new("ShaderNodeBackground")
+            bg_muted.name = "Background Muted"
+            mix = tree.nodes.new("ShaderNodeMixShader")
+            tree.links.new(bg.outputs["Background"], mix.inputs[1])
+            tree.links.new(bg_muted.outputs["Background"], mix.inputs[2]).is_muted = True
+            tree.links.new(mix.outputs["Shader"], output.inputs["Surface"])
+            result = {'ok': True}  # noqa: F841
+        self._test_tool("execute_blender_code", {
+            "code": _python_fn_body_as_string(code),
+        })
+        data = self._test_tool("get_scene_render_summary")
+        background = data["world"]["background"]
+        self.assertEqual([b["node"] for b in background], ["Background"])
+        self.assertEqual(background[0]["color_linked_from"], "Environment Texture")
+        self.assertIsNone(background[0]["strength_linked_from"])
+
     def test_get_scene_render_summary_no_world_or_camera(self) -> None:
         self._test_tool("execute_blender_code", {
             "code": (

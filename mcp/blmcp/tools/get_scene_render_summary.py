@@ -39,8 +39,9 @@ def register(mcp: MCPServer) -> None:
         sample count). ``engine_settings`` only covers the active engine.
         ``color_management`` holds the display device, view transform
         (e.g. ``AgX``), look, exposure and gamma.
-        ``world`` lists the Background nodes feeding the active world output
-        (color, strength and the node linked to each, if any) and the
+        ``world`` lists the Background nodes feeding the world output used by
+        the render engine (color, strength and the node linked to each,
+        if any, skipping Reroute nodes and muted links) and the
         Environment Texture images, it is ``None`` without a world.
         ``lights`` lists every light object in the scene, including hidden ones
         (see ``hide_render`` and ``visible``). ``energy`` is in watts,
