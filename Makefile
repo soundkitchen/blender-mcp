@@ -4,6 +4,7 @@
 export
 
 PYTHON ?= python
+MACOS_BLENDER_BIN = /Applications/Blender.app/Contents/MacOS/Blender
 PYTHON_SOURCE_DIRS_TO_CHECK = mcp/blmcp/ addon/blender_mcp_addon/ chat_client/ _misc/
 
 define HELP_TEXT
@@ -19,8 +20,9 @@ Targets
      List all tests:    make test_integration TESTS_LIST=1
      Run tests:         make test_integration TESTS=TestChatClient.test_name
      Multiple tests:    make test_integration TESTS="test_one test_two"
-   * build_addon:       Build the add-on into an installable zip under build/
-                        (requires BLENDER_BIN or blender in PATH).
+   * build_addon:       Build the add-on into an installable zip under build/.
+                        Uses BLENDER_BIN, then blender in PATH, then
+                        /Applications/Blender.app on macOS.
    * format:            Auto-format Python sources with autopep8.
    * readme_update:     Regenerate the tools listing in readme_tools.rst.
 
@@ -107,8 +109,16 @@ else
 endif
 
 build_addon:
-	@mkdir -p build
-	"$(or $(BLENDER_BIN),blender)" --command extension build \
+	@blender_bin="$${BLENDER_BIN:-$$(command -v blender || true)}"; \
+	if [ -z "$$blender_bin" ] && [ -x "$(MACOS_BLENDER_BIN)" ]; then \
+		blender_bin="$(MACOS_BLENDER_BIN)"; \
+	fi; \
+	if [ -z "$$blender_bin" ]; then \
+		echo "Blender not found: set BLENDER_BIN or add blender to PATH"; exit 1; \
+	fi; \
+	echo "Using $$blender_bin"; \
+	mkdir -p build && \
+	"$$blender_bin" --command extension build \
 		--source-dir addon/blender_mcp_addon --output-dir build
 
 format:

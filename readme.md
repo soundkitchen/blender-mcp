@@ -93,9 +93,10 @@ Build an installable zip with:
 
 ```sh
 make build_addon
-# or, when blender is not in PATH:
-make build_addon BLENDER_BIN=/Applications/Blender.app/Contents/MacOS/Blender
 ```
+
+Blender is looked up from `BLENDER_BIN`, then `blender` in `PATH`, then
+`/Applications/Blender.app` on macOS. Set `BLENDER_BIN` to use another binary.
 
 This writes `build/mcp-<version>.zip`. Drag and drop the zip onto a Blender
 window (or use *Edit → Preferences → Get Extensions → Install from Disk*),
