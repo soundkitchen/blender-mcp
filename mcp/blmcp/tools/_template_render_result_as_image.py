@@ -141,11 +141,23 @@ def _render_as_image(
     ]
     is_restored = False
 
+    # Detect a cancelled render (e.g. pressing Escape) explicitly,
+    # instead of relying on the output not being written.
+    is_cancelled = False
+
+    def on_render_cancel(_scene: Any) -> None:
+        nonlocal is_cancelled
+        is_cancelled = True
+
+    bpy.app.handlers.render_cancel.append(on_render_cancel)
+
     def restore() -> None:
         nonlocal is_restored
         if is_restored:
             return
         is_restored = True
+        if on_render_cancel in bpy.app.handlers.render_cancel:
+            bpy.app.handlers.render_cancel.remove(on_render_cancel)
         for obj, attr, value in restore_attrs:
             try:
                 setattr(obj, attr, value)
@@ -173,6 +185,8 @@ def _render_as_image(
         return {"status": "error", "message": "Render was cancelled"}
 
     def result_from_output() -> dict[str, Any]:
+        if is_cancelled:
+            return {"status": "error", "message": "Render was cancelled"}
         if not os.path.exists(output_path):
             return {"status": "error", "message": "Render completed but output file was not created"}
         return _render_file_as_image(output_path, size_limit_in_bytes, info, time_start)
