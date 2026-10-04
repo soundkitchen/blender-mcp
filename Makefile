@@ -51,7 +51,8 @@ Environment Variables
    Variables may be set in a .env file (loaded automatically).
 
    PYTHON              Python interpreter (default: python).
-   BLENDER_BIN         Path to the Blender binary (default: blender).
+   BLENDER_BIN         Path to the Blender binary (default: blender;
+                       build_addon also falls back to /Applications/Blender.app).
    BLENDER_MCP         Path to the blender-mcp command (default: blender-mcp).
    BLENDER_PATH        Path to the Blender binary used by the MCP server
                        (default: blender).
