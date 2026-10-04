@@ -927,6 +927,87 @@ class _TestServerMixin:
         self.assertEqual((info["render_width"], info["render_height"]), (640, 480))
         self.assertLess(int(str(info["image_width"])), 640)
 
+    def test_render_viewport_as_image_dims_max(self) -> None:
+        self._set_cycles_cpu()
+
+        def code_setup() -> None:
+            import bpy  # type: ignore[import-not-found]
+            rd = bpy.context.scene.render
+            rd.resolution_x = 2560
+            rd.resolution_y = 1440
+            bpy.context.scene.cycles.samples = 1
+            result = {'ok': True}  # noqa: F841
+        self._test_tool("execute_blender_code", {
+            "code": _python_fn_body_as_string(code_setup),
+        })
+        _image_data, info = self._call_tool_render_as_image("render_viewport_as_image")
+        self.assertEqual((info["render_width"], info["render_height"]), (2560, 1440))
+        self.assertLessEqual(max(int(str(info["image_width"])), int(str(info["image_height"]))), 2048)
+
+    def test_render_viewport_as_image_video_output(self) -> None:
+        """A video output (where PNG is not an available format) is restored after rendering."""
+        self._set_cycles_cpu()
+
+        def code_setup() -> None:
+            import bpy  # type: ignore[import-not-found]
+            rd = bpy.context.scene.render
+            rd.resolution_x = 320
+            rd.resolution_y = 240
+            bpy.context.scene.cycles.samples = 1
+            rd.filepath = "//custom_output_"
+            rd.image_settings.media_type = 'VIDEO'
+            rd.image_settings.file_format = 'FFMPEG'
+            result = {'ok': True}  # noqa: F841
+        self._test_tool("execute_blender_code", {
+            "code": _python_fn_body_as_string(code_setup),
+        })
+        self._call_tool_render_as_image("render_viewport_as_image")
+
+        def code_check() -> None:
+            import bpy  # type: ignore[import-not-found]
+            rd = bpy.context.scene.render
+            result = {  # noqa: F841
+                'filepath': rd.filepath,
+                'media_type': rd.image_settings.media_type,
+                'file_format': rd.image_settings.file_format,
+            }
+        data = self._test_tool("execute_blender_code", {
+            "code": _python_fn_body_as_string(code_check),
+        })
+        self.assertEqual(data["filepath"], "//custom_output_")
+        self.assertEqual(data["media_type"], "VIDEO")
+        self.assertEqual(data["file_format"], "FFMPEG")
+
+    def test_render_viewport_as_image_error_removes_previous_output(self) -> None:
+        """A failed render must not return the image of a previous render."""
+        self._set_cycles_cpu()
+
+        def code_setup() -> None:
+            import bpy  # type: ignore[import-not-found]
+            rd = bpy.context.scene.render
+            rd.resolution_x = 320
+            rd.resolution_y = 240
+            bpy.context.scene.cycles.samples = 1
+            result = {'ok': True}  # noqa: F841
+        self._test_tool("execute_blender_code", {
+            "code": _python_fn_body_as_string(code_setup),
+        })
+        _image_data, info = self._call_tool_render_as_image("render_viewport_as_image")
+        filepath = str(info["filepath"])
+
+        def code_remove_camera() -> None:
+            import bpy  # type: ignore[import-not-found]
+            bpy.data.objects.remove(bpy.data.objects["Camera"], do_unlink=True)
+            result = {'ok': True}  # noqa: F841
+        self._test_tool("execute_blender_code", {
+            "code": _python_fn_body_as_string(code_remove_camera),
+        })
+        self._call_tool_expect_error("render_viewport_as_image")
+        data = self._test_tool("execute_blender_code", {
+            "code": "import os\nresult = {{'exists': os.path.exists({!r})}}\n".format(filepath),
+        })
+        self.assertFalse(data["exists"])
+
     # -----------------------------------------------------------------
     # Deferred tool response.
 

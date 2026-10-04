@@ -12,8 +12,6 @@ __all__ = (
     "main",
 )
 
-import contextlib
-import typing
 from collections.abc import Callable
 from typing import Any, NamedTuple
 
@@ -38,28 +36,9 @@ class Result(NamedTuple):
     message: str | None = None
 
 
-# @include_begin: _template_backup_attrs_and_assign_multi.py
-@contextlib.contextmanager
-def _backup_attrs_and_assign_multi(
-        *obj_attrs: tuple[object, dict[str, object]],
-) -> typing.Generator[None, None, None]:
-    yield
-# @include_end
-
-
 # @include_begin: _template_render_thumbnail_overrides.py
 def _render_thumbnail_overrides(scene: Any) -> list[tuple[object, dict[str, object]]]:
     return []
-# @include_end
-
-
-# @include_begin: _template_deferred_tool_check_for_file_output.py
-def _deferred_tool_check_for_file_output(
-        job_type: str,
-        output_path: str,
-        restore_attrs: list[tuple[object, str, object]] | None = None,
-) -> Callable[[], dict[str, object] | None]:
-    return lambda: None
 # @include_end
 
 
@@ -73,83 +52,20 @@ def _image_downscale_to_size_limit(
 
 
 # @include_begin: _template_render_result_as_image.py
-def _render_result_as_image(
-        result: dict[str, object],
+def _render_as_image(
+        output_name: str,
+        obj_attrs: list[tuple[object, dict[str, object]]],
         size_limit_in_bytes: int,
-        info: dict[str, object],
-        time_start: float,
-) -> dict[str, Any]:
-    return result
-
-
-def _deferred_tool_check_as_image(
-        check_is_finished_for_file: Callable[[], dict[str, object] | None],
-        size_limit_in_bytes: int,
-        info: dict[str, object],
-        time_start: float,
-) -> Callable[[], dict[str, object] | None]:
-    return check_is_finished_for_file
+) -> dict[str, Any] | Callable[[], dict[str, Any] | None]:
+    return {}
 # @include_end
 
 
-def main(params: Params) -> Result | Callable[[], dict[str, object] | None]:
-    import os
-    import time
+def main(params: Params) -> Result | Callable[[], dict[str, Any] | None]:
     import bpy  # pylint: disable=import-error,no-name-in-module
 
-    use_deferred = not bpy.app.background
-
-    output_path = os.path.join(bpy.app.tempdir, "blender_mcp", _OUTPUT_NAME)
-
-    scene = bpy.context.scene
-    rd = scene.render
-
-    obj_attrs = _render_thumbnail_overrides(scene)
-
-    # NOTE: `filepath` and the image format are excluded from
-    # `_backup_attrs_and_assign_multi` because `write_still` reads them after
-    # the render completes. With `INVOKE_DEFAULT` the context manager would
-    # restore them before the file is written. Instead, they are restored
-    # once the render completes.
-    # The format is forced to 8-bit PNG so the file can be returned as-is.
-    restore_attrs: list[tuple[object, str, object]] = [
-        (rd, "filepath", rd.filepath),
-        (rd.image_settings, "file_format", rd.image_settings.file_format),
-        (rd.image_settings, "color_depth", rd.image_settings.color_depth),
-    ]
-    rd.filepath = output_path
-    rd.image_settings.file_format = 'PNG'
-    rd.image_settings.color_depth = '8'
-
-    def restore() -> None:
-        for obj, attr, value in restore_attrs:
-            setattr(obj, attr, value)
-
-    render_args = ('INVOKE_DEFAULT',) if use_deferred else ()
-
-    time_start = time.monotonic()
-    with _backup_attrs_and_assign_multi(*obj_attrs):
-        info: dict[str, object] = {
-            "render_width": rd.resolution_x * rd.resolution_percentage // 100,
-            "render_height": rd.resolution_y * rd.resolution_percentage // 100,
-            "engine": rd.engine,
-        }
-        try:
-            bpy.ops.render.render(*render_args, write_still=True)
-        except RuntimeError as ex:
-            restore()
-            return Result(status="error", message=str(ex))
-
-    if use_deferred:
-        return _deferred_tool_check_as_image(
-            _deferred_tool_check_for_file_output('RENDER', output_path, restore_attrs=restore_attrs),
-            params.size_limit_in_bytes, info, time_start,
-        )
-
-    restore()
-    if not os.path.exists(output_path):
-        return Result(status="error", message="Render completed but output file was not created")
-    return Result(**_render_result_as_image(
-        {"status": "ok", "filepath": output_path},
-        params.size_limit_in_bytes, info, time_start,
-    ))
+    obj_attrs = _render_thumbnail_overrides(bpy.context.scene)
+    result = _render_as_image(_OUTPUT_NAME, obj_attrs, params.size_limit_in_bytes)
+    if callable(result):
+        return result
+    return Result(**result)

@@ -513,9 +513,11 @@ EXPECTED_TOOLS = [
         "``image_width`` & ``image_height`` (of the returned image),\n"
         "``render_width`` & ``render_height``, ``engine`` and\n"
         "``render_time_seconds`` (approximate).\n"
+        "Fails when another render is running.\n"
         "\n"
-        "*size_limit_in_bytes* caps the image size in bytes.\n"
-        "Zero (the default) uses the MCP message size limit.\n",
+        "*size_limit_in_bytes* is the target image size in bytes.\n"
+        "Zero (the default) uses the MCP message size limit.\n"
+        "When even the smallest downscaled image exceeds it, that image is returned anyway.\n",
         "inputSchema": {
             "properties": {
                 "size_limit_in_bytes": {
@@ -553,14 +555,17 @@ EXPECTED_TOOLS = [
         "\n"
         "Use to check the final look (materials, lighting, composition),\n"
         "this can be slow depending on the render settings.\n"
-        "The image is downscaled when needed to fit *size_limit_in_bytes*.\n"
+        "The image is downscaled when needed: to 2048 pixels at most\n"
+        "(longest dimension), then to fit *size_limit_in_bytes*.\n"
         "Returns the image followed by JSON render info: ``filepath``\n"
         "(the full resolution render), ``image_width`` & ``image_height``\n"
         "(of the returned image), ``render_width`` & ``render_height``,\n"
         "``engine`` and ``render_time_seconds`` (approximate).\n"
+        "Fails when another render is running.\n"
         "\n"
-        "*size_limit_in_bytes* caps the image size in bytes.\n"
-        "Zero (the default) uses the MCP message size limit.\n",
+        "*size_limit_in_bytes* is the target image size in bytes.\n"
+        "Zero (the default) uses the MCP message size limit.\n"
+        "When even the smallest downscaled image exceeds it, that image is returned anyway.\n",
         "inputSchema": {
             "properties": {
                 "size_limit_in_bytes": {

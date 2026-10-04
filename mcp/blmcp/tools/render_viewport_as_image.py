@@ -35,14 +35,17 @@ def register(mcp: MCPServer) -> None:
 
         Use to check the final look (materials, lighting, composition),
         this can be slow depending on the render settings.
-        The image is downscaled when needed to fit *size_limit_in_bytes*.
+        The image is downscaled when needed: to 2048 pixels at most
+        (longest dimension), then to fit *size_limit_in_bytes*.
         Returns the image followed by JSON render info: ``filepath``
         (the full resolution render), ``image_width`` & ``image_height``
         (of the returned image), ``render_width`` & ``render_height``,
         ``engine`` and ``render_time_seconds`` (approximate).
+        Fails when another render is running.
 
-        *size_limit_in_bytes* caps the image size in bytes.
+        *size_limit_in_bytes* is the target image size in bytes.
         Zero (the default) uses the MCP message size limit.
+        When even the smallest downscaled image exceeds it, that image is returned anyway.
         """
         p = Params(size_limit_in_bytes=size_limit_in_bytes)
         response = send_code(toolcode_format_call(_TOOL_CALL, p), strict_json=True)

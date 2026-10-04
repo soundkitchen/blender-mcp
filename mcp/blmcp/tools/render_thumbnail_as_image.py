@@ -38,9 +38,11 @@ def register(mcp: MCPServer) -> None:
         ``image_width`` & ``image_height`` (of the returned image),
         ``render_width`` & ``render_height``, ``engine`` and
         ``render_time_seconds`` (approximate).
+        Fails when another render is running.
 
-        *size_limit_in_bytes* caps the image size in bytes.
+        *size_limit_in_bytes* is the target image size in bytes.
         Zero (the default) uses the MCP message size limit.
+        When even the smallest downscaled image exceeds it, that image is returned anyway.
         """
         p = Params(size_limit_in_bytes=size_limit_in_bytes)
         response = send_code(toolcode_format_call(_TOOL_CALL, p), strict_json=True)
