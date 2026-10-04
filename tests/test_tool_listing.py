@@ -248,6 +248,42 @@ EXPECTED_TOOLS = [
         }
     },
     {
+        "name": "get_object_geometry_summary",
+        "description": "\n"
+        "Return world-space bounds, element counts and modifier settings of the objects in *names*.\n"
+        "\n"
+        "Use to check sizes, overlaps and contact between objects, and how\n"
+        "modifiers shape them, before changing anything.\n"
+        "\n"
+        "``bounds_world`` holds the ``min``, ``max`` and ``size`` of the\n"
+        "axis-aligned world-space box around the geometry after modifiers\n"
+        "(as shown in the viewport), ``None`` for objects without geometry.\n"
+        "``counts_original`` (mesh objects only) and ``counts_evaluated``\n"
+        "(after modifiers) hold the number of vertices, edges, faces and\n"
+        "triangles. In Edit Mode, ``counts_original`` may not include\n"
+        "unsynced edits.\n"
+        "``modifiers`` lists each modifier with its visibility flags and\n"
+        "``settings`` (all editable properties, data-blocks by name).\n"
+        "Geometry Nodes modifiers also list their group ``inputs`` by name.\n"
+        "Names that don't match an object are listed in ``not_found``.\n",
+        "inputSchema": {
+            "properties": {
+                "names": {
+                    "items": {
+                        "type": "string"
+                    },
+                    "title": "Names",
+                    "type": "array"
+                }
+            },
+            "required": [
+                "names"
+            ],
+            "title": "get_object_geometry_summaryArguments",
+            "type": "object"
+        }
+    },
+    {
         "name": "get_objects_summary",
         "description": "\n"
         "Return the scene's collection hierarchy and their objects.\n"

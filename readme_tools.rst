@@ -56,6 +56,10 @@ The tools exposed by the MCP server.
 ``get_object_detail_summary``
    Return a structured summary of the object identified by *name*.
 
+``get_object_geometry_summary``
+   Return world-space bounds, element counts and modifier settings of the
+   objects in *names*.
+
 ``get_objects_summary``
    Return the scene's collection hierarchy and their objects.
 
