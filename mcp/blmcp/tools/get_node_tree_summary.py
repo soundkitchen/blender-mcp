@@ -44,7 +44,8 @@ def register(mcp: MCPServer) -> None:
 
         ``output_node`` is the output the tree is evaluated from (for shader
         trees, the one targeting the scene's render engine, or all engines).
-        Each node has its ``type``, ``used`` (feeds ``output_node``),
+        Each node has its ``type``, ``used`` (feeds ``output_node`` through
+        enabled inputs, or the pass-through inputs of muted nodes),
         ``mute``, ``settings`` (the node's own editable properties,
         data-blocks by name) and ``inputs``. Inputs that don't apply to the
         node's current settings are omitted. Linked inputs list their

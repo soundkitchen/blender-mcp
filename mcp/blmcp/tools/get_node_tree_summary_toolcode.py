@@ -142,6 +142,19 @@ def _link_sources(socket: _NodeSocket) -> list[tuple[_Node, _NodeSocket]]:
     return result
 
 
+def _passing_inputs(node: _Node) -> list[_NodeSocket]:
+    """
+    Return the inputs whose values reach the node's outputs.
+    """
+    if node.mute:
+        # A muted node only passes the inputs of its internal links.
+        sockets = [link.from_socket for link in node.internal_links]
+    else:
+        sockets = list(node.inputs)
+    # Disabled inputs keep their links (e.g. after changing a Mix node's data type) but are not evaluated.
+    return [socket for socket in sockets if socket.enabled]
+
+
 def _used_nodes(output: _Node | None) -> set[str]:
     """
     Return the names of the nodes feeding *output* (included), following links upstream.
@@ -155,7 +168,7 @@ def _used_nodes(output: _Node | None) -> set[str]:
         if node.name in used:
             continue
         used.add(node.name)
-        for socket in node.inputs:
+        for socket in _passing_inputs(node):
             for from_node, _from_socket in _link_sources(socket):
                 stack.append(from_node)
     return used

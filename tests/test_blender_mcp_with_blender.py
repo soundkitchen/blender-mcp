@@ -1085,6 +1085,71 @@ class _TestServerMixin:
         self.assertEqual([i["name"] for i in output_inputs], ["Geometry"])
         self.assertEqual(output_inputs[0]["linked_from"], ["Transform Geometry.Geometry"])
 
+    def test_get_node_tree_summary_used_disabled_and_muted(self) -> None:
+        def code() -> None:
+            import bpy  # type: ignore[import-not-found]
+
+            # Mix node socket names are not unique, look them up by identifier.
+            def socket(sockets, identifier):  # type: ignore[no-untyped-def]
+                return next(s for s in sockets if s.identifier == identifier)
+
+            group = bpy.data.node_groups.new("Geometry Group", 'GeometryNodeTree')
+            group.interface.new_socket("Geometry", in_out='INPUT', socket_type='NodeSocketGeometry')
+            group.interface.new_socket("Geometry", in_out='OUTPUT', socket_type='NodeSocketGeometry')
+            node_in = group.nodes.new("NodeGroupInput")
+            node_out = group.nodes.new("NodeGroupOutput")
+
+            # Group Input -> Muted (Set Position) -> Active (Set Position) -> Group Output.
+            muted = group.nodes.new("GeometryNodeSetPosition")
+            muted.name = "Muted"
+            muted.mute = True
+            active = group.nodes.new("GeometryNodeSetPosition")
+            active.name = "Active"
+            group.links.new(node_in.outputs["Geometry"], muted.inputs["Geometry"])
+            group.links.new(muted.outputs["Geometry"], active.inputs["Geometry"])
+            group.links.new(active.outputs["Geometry"], node_out.inputs["Geometry"])
+
+            # A muted node only passes its geometry, its offset is not evaluated.
+            muted_offset = group.nodes.new("FunctionNodeInputVector")
+            muted_offset.name = "Muted Offset"
+            group.links.new(muted_offset.outputs[0], muted.inputs["Offset"])
+
+            # A float Mix node feeds the active offset, the link to its disabled
+            # vector input is kept but not evaluated.
+            mix = group.nodes.new("ShaderNodeMix")
+            mix.data_type = 'VECTOR'
+            disabled_source = group.nodes.new("FunctionNodeInputVector")
+            disabled_source.name = "Disabled Source"
+            group.links.new(disabled_source.outputs[0], socket(mix.inputs, "A_Vector"))
+            mix.data_type = 'FLOAT'
+            enabled_source = group.nodes.new("ShaderNodeValue")
+            enabled_source.name = "Enabled Source"
+            group.links.new(enabled_source.outputs[0], socket(mix.inputs, "A_Float"))
+            group.links.new(socket(mix.outputs, "Result_Float"), active.inputs["Offset"])
+            result = {'ok': True}  # noqa: F841
+        data = self._test_tool("execute_blender_code", {
+            "code": _python_fn_body_as_string(code),
+        })
+        self.assertEqual(data, {"ok": True})
+        data = self._test_tool("get_node_tree_summary", {"kind": "node_group", "name": "Geometry Group"})
+        nodes = {node["name"]: node for node in data["nodes"]}
+        self.assertTrue(nodes["Muted"]["mute"])
+        self.assertEqual(
+            {name: node["used"] for name, node in nodes.items()},
+            {
+                "Group Input": True,
+                "Group Output": True,
+                "Muted": True,
+                "Muted Offset": False,
+                "Active": True,
+                "Mix": True,
+                "Enabled Source": True,
+                "Disabled Source": False,
+            },
+        )
+        # The disabled input is not listed, consistent with `used`.
+        self.assertNotIn("A_Vector", [i["identifier"] for i in nodes["Mix"]["inputs"]])
+
     def test_get_node_tree_summary_world_and_light(self) -> None:
         data = self._test_tool("get_node_tree_summary", {"kind": "world", "name": "World"})
         self.assertEqual(data["status"], "ok")
