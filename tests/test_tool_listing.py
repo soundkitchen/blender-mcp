@@ -216,6 +216,56 @@ EXPECTED_TOOLS = [
         }
     },
     {
+        "name": "get_node_tree_summary",
+        "description": "\n"
+        "Return the nodes of a node tree with their settings, input values and links.\n"
+        "\n"
+        "Use to understand an existing material, world, light or node group\n"
+        "before changing it, instead of reading nodes with Python.\n"
+        "\n"
+        "*kind* selects the data-block type and *name* its name:\n"
+        "``node_group`` covers Geometry Nodes, shader node groups and\n"
+        "compositor node groups.\n"
+        "\n"
+        "``output_node`` is the output the tree is evaluated from (for shader\n"
+        "trees, the one targeting the scene's render engine, or all engines).\n"
+        "Each node has its ``type``, ``used`` (feeds ``output_node`` through\n"
+        "enabled inputs, or the pass-through inputs of muted nodes),\n"
+        "``mute``, ``settings`` (the node's own editable properties,\n"
+        "data-blocks by name) and ``inputs``. Inputs that don't apply to the\n"
+        "node's current settings are omitted. Linked inputs list their\n"
+        "sources in ``linked_from`` as ``\"Node.socket_identifier\"``\n"
+        "(skipping Reroute nodes and muted links), others hold their ``value``.\n"
+        "Frame and Reroute nodes are not listed.\n"
+        "Group nodes reference their group by name in ``settings``, use\n"
+        "``node_group`` to inspect it, ``groups_used`` lists the groups.\n"
+        "``interface`` lists a node group's inputs and outputs.\n",
+        "inputSchema": {
+            "properties": {
+                "kind": {
+                    "enum": [
+                        "material",
+                        "world",
+                        "light",
+                        "node_group"
+                    ],
+                    "title": "Kind",
+                    "type": "string"
+                },
+                "name": {
+                    "title": "Name",
+                    "type": "string"
+                }
+            },
+            "required": [
+                "kind",
+                "name"
+            ],
+            "title": "get_node_tree_summaryArguments",
+            "type": "object"
+        }
+    },
+    {
         "name": "get_object_detail_summary",
         "description": "\n"
         "Return a structured summary of the object identified by *name*.\n"
