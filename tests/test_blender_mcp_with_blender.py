@@ -949,6 +949,160 @@ class _TestServerMixin:
         self.assertEqual(inputs["Size"]["socket_type"], "NodeSocketFloat")
         self.assertEqual(inputs["Target"]["value"], "Camera")
 
+    def test_get_node_tree_summary_material(self) -> None:
+        def code() -> None:
+            import bpy  # type: ignore[import-not-found]
+            tree = bpy.data.materials["Material"].node_tree
+            bsdf = tree.nodes["Principled BSDF"]
+
+            # Noise -> Reroute -> Color Ramp -> Base Color.
+            noise = tree.nodes.new("ShaderNodeTexNoise")
+            reroute = tree.nodes.new("NodeReroute")
+            ramp = tree.nodes.new("ShaderNodeValToRGB")
+            ramp.color_ramp.elements[0].position = 0.25
+            tree.links.new(noise.outputs["Fac"], reroute.inputs[0])
+            tree.links.new(reroute.outputs[0], ramp.inputs["Fac"])
+            tree.links.new(ramp.outputs["Color"], bsdf.inputs["Base Color"])
+
+            # Not connected to any output.
+            tree.nodes.new("ShaderNodeMix").name = "Unused Mix"
+
+            # A group node behind a muted link is not used.
+            group = bpy.data.node_groups.new("Shader Group", 'ShaderNodeTree')
+            group.interface.new_socket("Value", in_out='OUTPUT', socket_type='NodeSocketFloat')
+            group.nodes.new("NodeGroupOutput")
+            group_node = tree.nodes.new("ShaderNodeGroup")
+            group_node.node_tree = group
+            tree.links.new(group_node.outputs[0], bsdf.inputs["Roughness"]).is_muted = True
+            bsdf.inputs["Roughness"].default_value = 0.25
+            result = {'ok': True}  # noqa: F841
+        self._test_tool("execute_blender_code", {
+            "code": _python_fn_body_as_string(code),
+        })
+        data = self._test_tool("get_node_tree_summary", {"kind": "material", "name": "Material"})
+        self.assertEqual(data["status"], "ok")
+        self.assertEqual(data["tree_type"], "ShaderNodeTree")
+        self.assertEqual(data["output_node"], "Material Output")
+        self.assertIsNone(data["interface"])
+        self.assertEqual(data["groups_used"], ["Shader Group"])
+
+        nodes = {node["name"]: node for node in data["nodes"]}
+        # Reroute nodes are skipped.
+        self.assertEqual(
+            sorted(nodes),
+            ["Color Ramp", "Group", "Material Output", "Noise Texture", "Principled BSDF", "Unused Mix"],
+        )
+        self.assertEqual(
+            {name: node["used"] for name, node in nodes.items()},
+            {
+                "Color Ramp": True,
+                "Group": False,
+                "Material Output": True,
+                "Noise Texture": True,
+                "Principled BSDF": True,
+                "Unused Mix": False,
+            },
+        )
+
+        bsdf_inputs = {i["identifier"]: i for i in nodes["Principled BSDF"]["inputs"]}
+        self.assertEqual(bsdf_inputs["Base Color"]["linked_from"], ["Color Ramp.Color"])
+        self.assertNotIn("value", bsdf_inputs["Base Color"])
+        # The link is muted, the input uses its own value.
+        self.assertNotIn("linked_from", bsdf_inputs["Roughness"])
+        self.assertAlmostEqual(bsdf_inputs["Roughness"]["value"], 0.25)
+        self.assertEqual(nodes["Principled BSDF"]["settings"]["distribution"], "MULTI_GGX")
+
+        ramp_inputs = {i["identifier"]: i for i in nodes["Color Ramp"]["inputs"]}
+        self.assertEqual(ramp_inputs["Fac"]["linked_from"], ["Noise Texture.Fac"])
+        elements = nodes["Color Ramp"]["settings"]["color_ramp"]["elements"]
+        self.assertAlmostEqual(elements[0]["position"], 0.25)
+        self.assertEqual(elements[1]["color"], [1.0, 1.0, 1.0, 1.0])
+
+        # Only the inputs of the current data type are listed.
+        self.assertEqual(
+            [i["identifier"] for i in nodes["Unused Mix"]["inputs"]],
+            ["Factor_Float", "A_Float", "B_Float"],
+        )
+        self.assertEqual(nodes["Group"]["settings"]["node_tree"], "Shader Group")
+
+        # An output targeting the render engine takes precedence.
+        def code_cycles_output() -> None:
+            import bpy  # type: ignore[import-not-found]
+            bpy.context.scene.render.engine = 'CYCLES'
+            tree = bpy.data.materials["Material"].node_tree
+            output = tree.nodes.new("ShaderNodeOutputMaterial")
+            output.name = "Cycles Output"
+            output.target = 'CYCLES'
+            tree.links.new(tree.nodes["Unused Mix"].outputs[0], output.inputs["Surface"])
+            result = {'ok': True}  # noqa: F841
+        self._test_tool("execute_blender_code", {
+            "code": _python_fn_body_as_string(code_cycles_output),
+        })
+        data = self._test_tool("get_node_tree_summary", {"kind": "material", "name": "Material"})
+        self.assertEqual(data["output_node"], "Cycles Output")
+        nodes = {node["name"]: node for node in data["nodes"]}
+        self.assertTrue(nodes["Unused Mix"]["used"])
+        self.assertFalse(nodes["Principled BSDF"]["used"])
+
+    def test_get_node_tree_summary_node_group(self) -> None:
+        def code() -> None:
+            import bpy  # type: ignore[import-not-found]
+            group = bpy.data.node_groups.new("Geometry Group", 'GeometryNodeTree')
+            group.interface.new_socket("Geometry", in_out='INPUT', socket_type='NodeSocketGeometry')
+            size = group.interface.new_socket("Size", in_out='INPUT', socket_type='NodeSocketFloat')
+            size.default_value = 2.0
+            group.interface.new_socket("Geometry", in_out='OUTPUT', socket_type='NodeSocketGeometry')
+            node_in = group.nodes.new("NodeGroupInput")
+            node_out = group.nodes.new("NodeGroupOutput")
+            transform = group.nodes.new("GeometryNodeTransform")
+            group.links.new(node_in.outputs["Geometry"], transform.inputs["Geometry"])
+            group.links.new(transform.outputs["Geometry"], node_out.inputs["Geometry"])
+            group.nodes.new("NodeFrame")
+            result = {'ok': True}  # noqa: F841
+        self._test_tool("execute_blender_code", {
+            "code": _python_fn_body_as_string(code),
+        })
+        data = self._test_tool("get_node_tree_summary", {"kind": "node_group", "name": "Geometry Group"})
+        self.assertEqual(data["status"], "ok")
+        self.assertEqual(data["tree_type"], "GeometryNodeTree")
+        self.assertEqual(data["output_node"], "Group Output")
+        self.assertEqual(data["groups_used"], [])
+
+        interface = {(i["in_out"], i["name"]): i for i in data["interface"]}
+        self.assertEqual(
+            sorted(interface),
+            [("INPUT", "Geometry"), ("INPUT", "Size"), ("OUTPUT", "Geometry")],
+        )
+        self.assertAlmostEqual(interface[("INPUT", "Size")]["default_value"], 2.0)
+        self.assertEqual(interface[("INPUT", "Size")]["socket_type"], "NodeSocketFloat")
+
+        nodes = {node["name"]: node for node in data["nodes"]}
+        # Frame nodes are skipped.
+        self.assertEqual(sorted(nodes), ["Group Input", "Group Output", "Transform Geometry"])
+        self.assertTrue(all(node["used"] for node in nodes.values()))
+        # The empty slot of the group output is not listed.
+        output_inputs = nodes["Group Output"]["inputs"]
+        self.assertEqual([i["name"] for i in output_inputs], ["Geometry"])
+        self.assertEqual(output_inputs[0]["linked_from"], ["Transform Geometry.Geometry"])
+
+    def test_get_node_tree_summary_world_and_light(self) -> None:
+        data = self._test_tool("get_node_tree_summary", {"kind": "world", "name": "World"})
+        self.assertEqual(data["status"], "ok")
+        self.assertEqual(data["output_node"], "World Output")
+        nodes = {node["name"]: node for node in data["nodes"]}
+        background = {i["identifier"]: i for i in nodes["Background"]["inputs"]}
+        self.assertAlmostEqual(background["Strength"]["value"], 1.0)
+
+        data = self._test_tool("get_node_tree_summary", {"kind": "light", "name": "Light"})
+        self.assertEqual(data["status"], "ok")
+        self.assertEqual(data["tree_type"], "ShaderNodeTree")
+
+    def test_get_node_tree_summary_error(self) -> None:
+        data = self._test_tool("get_node_tree_summary", {"kind": "material", "name": "NonExistent"})
+        self.assertEqual(data["status"], "error")
+        self.assertIn("'NonExistent' not found", data["message"])
+        self.assertIn("Material", data["message"])
+
     def test_get_scene_render_summary(self) -> None:
         data = self._test_tool("get_scene_render_summary")
         self.assertEqual(data["status"], "ok")

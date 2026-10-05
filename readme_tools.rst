@@ -53,6 +53,10 @@ The tools exposed by the MCP server.
 ``get_blendfile_summary_usage_guess_for_cli``
    Guess use-cases by opening *blend_file* in background Blender.
 
+``get_node_tree_summary``
+   Return the nodes of a node tree with their settings, input values and
+   links.
+
 ``get_object_detail_summary``
    Return a structured summary of the object identified by *name*.
 
