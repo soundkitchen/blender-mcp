@@ -40,6 +40,7 @@ class Result(NamedTuple):
     wire_edges: dict[str, Any] | None = None
     loose_vertices: dict[str, Any] | None = None
     inconsistent_normal_edges: dict[str, Any] | None = None
+    islands: dict[str, Any] | None = None
     creases: dict[str, int] | None = None
     sharp_edges: int | None = None
     symmetry: list[dict[str, Any]] | None = None
@@ -148,6 +149,9 @@ class _Items:
         self._verts = {v: i for i, v in enumerate(bm.verts)}
         self._edges = {e: i for i, e in enumerate(bm.edges)}
         self._faces = {f: i for i, f in enumerate(bm.faces)}
+
+    def vert_index(self, v: _BMVert) -> int:
+        return self._verts[v]
 
     def vert(self, v: _BMVert) -> dict[str, Any]:
         return {"index": self._verts[v], "co": _round_co(v.co)}
@@ -363,6 +367,52 @@ def _subdivision_size(
     }
 
 
+def _islands(bm: _BMesh, items: _Items) -> dict[str, Any]:
+    """
+    Return the parts of the cage with faces that are not connected to each other, the largest first.
+
+    Parts without faces (loose vertices, wire edges) are reported by their own checks.
+    Each part has its number of ``vertices`` and ``faces``, its smallest vertex index
+    (``first_vertex``) and the ``center`` of its object-space bounds.
+    """
+    seen: set[Any] = set()
+    # `(vertices, start)`, the start vertex has the smallest index of its part
+    # (parts are found in vertex order).
+    parts: list[tuple[list[Any], Any]] = []
+    for start in bm.verts:
+        if start in seen:
+            continue
+        seen.add(start)
+        stack = [start]
+        verts = []
+        while stack:
+            v = stack.pop()
+            verts.append(v)
+            for e in v.link_edges:
+                other = e.other_vert(v)
+                if other not in seen:
+                    seen.add(other)
+                    stack.append(other)
+        if any(v.link_faces for v in verts):
+            parts.append((verts, start))
+    # A stable sort keeps parts of the same size in vertex order.
+    parts.sort(key=lambda part: -len(part[0]))
+
+    result = []
+    # Only the listed parts need their faces and bounds.
+    for verts, start in parts[:_ITEMS_MAX]:
+        # Defined by `_template_coords_min_max.py`.
+        min_max = _coords_min_max([c for v in verts for c in v.co])
+        assert min_max is not None
+        result.append({
+            "vertices": len(verts),
+            "faces": len({f for v in verts for f in v.link_faces}),
+            "first_vertex": items.vert_index(start),
+            "center": _round_co([(lo + hi) / 2.0 for lo, hi in zip(*min_max)]),
+        })
+    return {"count": len(parts), "items": result}
+
+
 def _topology(obj: _Object, bm: _BMesh, is_edit_mode: bool) -> dict[str, Any]:
     planes = _mirror_planes(obj)
     items = _Items(bm)
@@ -431,6 +481,7 @@ def _topology(obj: _Object, bm: _BMesh, is_edit_mode: bool) -> dict[str, Any]:
         "wire_edges": _listing(wire, items.edge),
         "loose_vertices": _listing(loose, items.vert),
         "inconsistent_normal_edges": _listing(inconsistent, items.edge),
+        "islands": _islands(bm, items),
         "creases": {
             "edges": sum(1 for e in bm.edges if e[crease_edge] > 0.0) if crease_edge is not None else 0,
             "vertices": sum(1 for v in bm.verts if v[crease_vert] > 0.0) if crease_vert is not None else 0,

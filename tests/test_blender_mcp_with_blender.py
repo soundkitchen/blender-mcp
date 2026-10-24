@@ -1204,6 +1204,7 @@ class _TestServerMixin:
         self.assertEqual(data["counts"], {"vertices": 8, "edges": 12, "faces": 5})
         self.assertEqual(data["faces"]["quads"], 5)
         self.assertEqual(data["faces"]["triangles"]["count"], 0)
+        self.assertEqual(data["islands"]["count"], 1)
 
         # Only the 4 outer corners are poles, those on the mirror plane get 4 edges once mirrored.
         poles = data["poles"]
@@ -1287,6 +1288,13 @@ class _TestServerMixin:
         self.assertEqual(data["wire_edges"]["count"], 1)
         self.assertEqual(data["loose_vertices"]["count"], 1)
         self.assertEqual(data["loose_vertices"]["items"][0]["co"], [4.0, 0.0, 0.0])
+        # Only the grid: the wire edge and the loose vertex have no faces (reported above).
+        islands = data["islands"]
+        self.assertEqual(islands["count"], 1)
+        (grid,) = islands["items"]
+        self.assertEqual((grid["vertices"], grid["faces"]), (16, 9))
+        self.assertEqual(grid["first_vertex"], 0)
+        self.assertEqual(grid["center"], [0.0, 0.0, 0.0])
         self.assertEqual(data["non_manifold_edges"]["count"], 0)
         # The flipped face is joined to 2 neighbors.
         self.assertEqual(data["inconsistent_normal_edges"]["count"], 2)
@@ -1298,6 +1306,39 @@ class _TestServerMixin:
         self.assertEqual(len(warnings), 2)
         self.assertIn("comes before Mirror", warnings[0])
         self.assertIn("clipping disabled", warnings[1])
+
+    def test_get_mesh_topology_summary_islands(self) -> None:
+        def code() -> None:
+            import bmesh  # type: ignore[import-not-found]
+            import bpy  # type: ignore[import-not-found]
+            from mathutils import Matrix  # type: ignore[import-not-found]
+            mesh = bpy.data.meshes.new("Parts")
+            bm = bmesh.new()
+            # A small cube first (lower vertex indices), then a larger grid, then a loose vertex.
+            bmesh.ops.create_cube(bm, size=0.2, matrix=Matrix.Translation((0.5, 0.0, 0.0)))
+            bmesh.ops.create_grid(bm, x_segments=3, y_segments=3, size=1.0)
+            bm.verts.new((3.0, 0.0, 0.0))
+            bm.to_mesh(mesh)
+            bm.free()
+            obj = bpy.data.objects.new("Parts", mesh)
+            bpy.context.scene.collection.objects.link(obj)
+            # The cube doesn't touch the mirror plane, it is still one part of the cage.
+            obj.modifiers.new("Mirror", 'MIRROR')
+            result = {'ok': True}  # noqa: F841
+        self._test_tool("execute_blender_code", {
+            "code": _python_fn_body_as_string(code),
+        })
+        data = self._test_tool("get_mesh_topology_summary", {"name": "Parts"})
+        self.assertEqual(data["status"], "ok")
+        islands = data["islands"]
+        # The loose vertex is not a part, the largest part comes first.
+        self.assertEqual(islands["count"], 2)
+        grid, cube = islands["items"]
+        self.assertEqual((grid["vertices"], grid["faces"], grid["first_vertex"]), (16, 9, 8))
+        self.assertEqual((cube["vertices"], cube["faces"], cube["first_vertex"]), (8, 6, 0))
+        for value, expected in zip(cube["center"], (0.5, 0.0, 0.0)):
+            self.assertAlmostEqual(value, expected, places=5)
+        self.assertEqual(data["loose_vertices"]["count"], 1)
 
     def test_get_mesh_topology_summary_mirror_planes(self) -> None:
         def code() -> None:
