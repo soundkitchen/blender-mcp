@@ -1,0 +1,278 @@
+# Character Modeling with Subdivision Surfaces
+
+How to build a character base mesh (a subdivision cage) with code, check it and refine it.
+Prefer this over combining primitives: a single connected, all-quad cage under a
+Subdivision Surface modifier gives smooth, editable shapes.
+
+## Approach
+
+* **Box modeling on the right half.** Build only the `X >= 0` half, open on the mirror
+  plane (`X = 0`), with a Mirror modifier (merge and clipping enabled) followed by a
+  Subdivision Surface modifier. Never apply them while modeling.
+* **Torso first, then extrude.** Stack rings for the torso, then extrude the legs from
+  the bottom, the arms from the side and the neck and head from the top, placing each
+  new ring explicitly (center, width, depth).
+* **Quads only.** Every face should have 4 sides. Poles (vertices with 3 or 5 edges) are
+  expected where limbs leave the torso, keep them there rather than on visible curves.
+* **Check after every step** (see *Checking*), fix problems before shaping further.
+
+The Skin modifier (a vertex/edge skeleton with radii) is a quick alternative, but at
+branches (chest to shoulders, pelvis to legs) it often makes separate parts, poles with
+8 edges and triangles that need manual repair. If you use it, check `islands` right after
+converting it to a mesh.
+
+## Steps
+
+1. **Check the scene units** (`scene.unit_settings`), sizes below are in meters for a
+   1.7 m character.
+2. **Torso rings.** Each ring has 6 points on the half: center front, mid front, side front,
+   side back, mid back, center back. 5 faces per segment leave room for the limbs:
+   split the bottom cap in two (inner: crotch, outer: leg root) and the top cap in two
+   (inner: neck root, outer: shoulder top). The arm root is the side face of the top segment.
+3. **Legs.** Extrude the outer bottom face down: thigh, knee, calf, ankle, then a heel block
+   on the ground. Extrude the front face of the heel block forward for the ball of the foot
+   and the toes. Keep the sole at `Z = 0`.
+4. **Arms.** Extrude the side face out along `+X`: shoulder, elbow, wrist, hand.
+5. **Neck and head.** Extrude the inner top face up: neck, jaw, widest part of the skull, top.
+6. **Shape.** Move vertices by index with `render_mesh_wireframe_as_image` (zoom in with
+   `bounds_min`/`bounds_max`), add edge loops where a shape needs more detail
+   (`bmesh.ops.subdivide_edgering`).
+7. **Ground contact.** Subdivision shrinks the shape: check the lowest point after modifiers
+   (`bounds_world` of `get_object_geometry_summary`) and move the cage so it touches the
+   ground, see *Ground contact* below.
+
+## Pitfalls
+
+* **Faces on the mirror plane.** Extruding a face with an edge on `X = 0` creates a face on
+  the plane, deleting it leaves a wire edge across the ring. Both end up inside the mirrored
+  mesh: delete them after each such extrusion (the example below does).
+* **Assign roles by connectivity, not position.** After an extrusion, the new vertices sit
+  where the old ones were. Telling them apart by sorting positions breaks when rings are not
+  aligned (e.g. the front of a heel block, wider at the bottom than at the ankle), twisting
+  the next ring. Give each vertex a role and let extruded vertices inherit the role of the
+  vertex they came from.
+* **Stale lookup tables.** After creating or deleting elements, `bm.verts[i]` raises until
+  `bm.verts.ensure_lookup_table()` is called again. Resolve the vertices you need into
+  variables before running operators.
+* **Write back.** Changes to a `bmesh.new()` copy only apply after `bm.to_mesh(mesh)`
+  (in Edit Mode: `bmesh.update_edit_mesh(mesh)`).
+* **Imports.** Code run by `execute_blender_code` starts with nothing imported:
+  `import bpy` (and `bmesh`, `mathutils`) in every call.
+
+## Checking
+
+* `get_mesh_topology_summary` after each step: one entry in `islands` (parts not joined to
+  the body show up as more), no `boundary_edges` (holes), `non_manifold_edges`,
+  `wire_edges`, `loose_vertices` or `inconsistent_normal_edges`, no triangles or n-gons,
+  no `off_center_vertices` or `crossing_faces`, and no `warnings`.
+* Expected poles in this layout: 5 edges where the legs, arms and neck leave the torso and
+  in front of the ankle (8), 3 edges at the corners of the head top, hand tip, toe tip and
+  heel back (12). Poles elsewhere, or with 6 or more edges, point to a modeling mistake.
+* `render_mesh_wireframe_as_image` to see the shape and which vertex index is where:
+  `FRONT` and `RIGHT` for the whole body, `TOP` for the arms (seen from the side they
+  overlap the torso), then zoom in on details. Twisted rings and crossing edges show up
+  here, not in the topology summary.
+* A screenshot or render for the final look.
+
+## Ground contact
+
+Moves the cage so the lowest point after modifiers is at world `Z = 0`, keeping the object's
+origin where it is (e.g. at the feet). The object and its parents may be moved, scaled and
+rotated around `Z` only: when tilted, the offset would move the cage along its own `X` axis,
+off the mirror plane, opening the seam (the code stops instead). Run it in Object Mode:
+in Edit Mode, leaving it writes the edit-mesh back over these changes.
+
+<!-- example: ground-contact -->
+```python
+import bpy
+from mathutils import Vector
+
+obj = bpy.data.objects["Character"]
+depsgraph = bpy.context.evaluated_depsgraph_get()
+obj_eval = obj.evaluated_get(depsgraph)
+mesh_eval = obj_eval.to_mesh()
+lowest = min((obj_eval.matrix_world @ v.co).z for v in mesh_eval.vertices)
+obj_eval.to_mesh_clear()
+# The world-space offset in object space: moving every vertex by it moves the result
+# by the same world-space offset, as long as it stays in the mirror plane (no X part).
+offset = obj.matrix_world.inverted_safe().to_3x3() @ Vector((0.0, 0.0, -lowest))
+if abs(offset.x) > 1e-6:
+    raise RuntimeError("The object is tilted, moving the cage would open the mirror seam")
+for v in obj.data.vertices:
+    v.co += offset
+obj.data.update()
+result = {"moved_by": -lowest}
+```
+
+## Example
+
+A complete, tested starting point: a base mesh about 1.7 m tall after subdivision
+(96 vertices, all quads, one part, 12 poles with 3 edges and 8 with 5, see *Checking*).
+Change `HEIGHT`, the ring tables and the per-ring sizes to adapt the proportions,
+then refine by index as described above.
+
+<!-- example: character -->
+```python
+import bmesh
+import bpy
+
+NAME = "Character"    # Check the name is free: Blender appends ".001" on a collision.
+HEIGHT = 1.7          # Meters, the proportions below are for 1.7 and scaled to this.
+LOCATION = (0.0, 0.0, 0.0)
+
+S = HEIGHT / 1.7
+bm = bmesh.new()
+# Each vertex gets a role name (e.g. "inner_front"), extruded vertices inherit the role
+# of the vertex they were extruded from: roles never depend on (possibly ambiguous) positions.
+role = {}
+
+
+def ring(points, names):
+    verts = [bm.verts.new(tuple(c * S for c in p)) for p in points]
+    for v, n in zip(verts, names):
+        role[v] = n
+    return verts
+
+
+def extrude(face):
+    """Extrude *face*, return the new cap face. New vertices inherit the roles of their sources."""
+    old = set(face.verts)
+    edges = set(face.edges)
+    res = bmesh.ops.extrude_face_region(bm, geom=[face])
+    cap = next(g for g in res["geom"] if isinstance(g, bmesh.types.BMFace))
+    for v in cap.verts:
+        src = next(e.other_vert(v) for e in v.link_edges if e.other_vert(v) in old)
+        role[v] = role[src]
+    bmesh.ops.delete(bm, geom=[face], context='FACES_ONLY')
+    # Extruding a face with an edge on the mirror plane (X=0) leaves a face on the plane,
+    # and deleting it leaves a wire edge across the ring: both would be inside the mirrored mesh.
+    # Only the new side faces (around the cap) and the edges of the deleted faces need checking.
+    sides = {f for v in cap.verts for f in v.link_faces if f is not cap}
+    on_plane = [f for f in sides if all(abs(v.co.x) < 1e-6 for v in f.verts)]
+    for f in on_plane:
+        edges.update(f.edges)
+    bmesh.ops.delete(bm, geom=on_plane, context='FACES_ONLY')
+    bmesh.ops.delete(bm, geom=[e for e in edges if e.is_valid and not e.link_faces], context='EDGES')
+    return cap
+
+
+def place(face, positions):
+    """Move the vertices of *face* to *positions*, a dict from role to (x, y, z) at 1.7 m."""
+    for v in face.verts:
+        v.co = tuple(c * S for c in positions[role[v]])
+
+
+def relabel(face, fn):
+    """Rename the roles of *face*'s vertices with *fn(vertex) -> role*, e.g. before changing direction."""
+    for v in face.verts:
+        role[v] = fn(v)
+
+
+# --- Torso: rings of 6 points on the right half (x >= 0), open on the mirror plane.
+# The bottom and top are split in 2 faces: legs come from the outer bottom face,
+# the neck from the inner top face. Arms come from the side face of the top segment.
+NAMES = ["c_front", "m_front", "s_front", "s_back", "m_back", "c_back"]
+TORSO = [  # (z, mid x, side x, front y, back y)
+    (0.86, 0.045, 0.150, -0.070, 0.090),  # crotch
+    (0.97, 0.070, 0.165, -0.085, 0.105),  # hips
+    (1.08, 0.060, 0.135, -0.075, 0.075),  # waist
+    (1.20, 0.070, 0.150, -0.095, 0.080),  # lower chest
+    (1.32, 0.070, 0.165, -0.105, 0.085),  # chest
+    (1.42, 0.055, 0.150, -0.060, 0.060),  # shoulder line
+]
+rings = [
+    ring([(0.0, yf, z), (xm, yf, z), (xs, yf * 0.6, z), (xs, yb * 0.6, z), (xm, yb, z), (0.0, yb, z)], NAMES)
+    for z, xm, xs, yf, yb in TORSO
+]
+for a, b in zip(rings, rings[1:]):
+    for k in range(5):
+        bm.faces.new((a[k], a[k + 1], b[k + 1], b[k]))
+r0, r4, r5 = rings[0], rings[4], rings[5]
+bm.faces.new((r0[0], r0[5], r0[4], r0[1]))                 # crotch, stays
+leg_root = bm.faces.new((r0[1], r0[4], r0[3], r0[2]))
+neck_root = bm.faces.new((r5[0], r5[1], r5[4], r5[5]))
+bm.faces.new((r5[1], r5[2], r5[3], r5[4]))                 # shoulder top, stays
+arm_root = next(f for f in r4[2].link_faces if r5[3] in f.verts)
+
+# --- Leg, down from the outer bottom face, then the foot forward from the heel.
+relabel(leg_root, lambda v: {"m_front": "in_front", "m_back": "in_back",
+                             "s_front": "out_front", "s_back": "out_back"}[role[v]])
+
+
+def leg(cx, cy, z, hx, hy):
+    return {"in_front": (cx - hx, cy - hy, z), "in_back": (cx - hx, cy + hy, z),
+            "out_front": (cx + hx, cy - hy, z), "out_back": (cx + hx, cy + hy, z)}
+
+
+face = leg_root
+for args in [(0.095, 0.010, 0.72, 0.070, 0.080),   # thigh
+             (0.095, -0.005, 0.47, 0.050, 0.055),  # knee
+             (0.095, 0.010, 0.30, 0.048, 0.058),   # calf
+             (0.095, 0.010, 0.10, 0.034, 0.040)]:  # ankle
+    face = extrude(face)
+    place(face, leg(*args))
+ankle = set(face.verts)
+heel = extrude(face)
+place(heel, leg(0.095, 0.015, 0.0, 0.040, 0.050))           # heel block, on the ground
+# The front of the heel block: the ankle and heel vertices with a "front" role.
+foot_root = next(f for v in heel.verts for f in v.link_faces
+                 if f is not heel and all(role[v2].endswith("_front") for v2 in f.verts))
+relabel(foot_root, lambda v: ("in" if role[v].startswith("in") else "out") + ("_top" if v in ankle else "_bottom"))
+
+
+def foot(y, hx, top, cx=0.095):
+    return {"in_bottom": (cx - hx, y, 0.0), "in_top": (cx - hx, y, top),
+            "out_bottom": (cx + hx, y, 0.0), "out_top": (cx + hx, y, top)}
+
+
+face = foot_root
+for args in [(-0.07, 0.046, 0.065),   # ball of the foot
+             (-0.16, 0.040, 0.035)]:  # toes
+    face = extrude(face)
+    place(face, foot(*args))
+
+# --- Arm, out along +X from the side face of the top torso segment.
+relabel(arm_root, lambda v: ("bottom" if v in r4 else "top") + ("_front" if role[v] == "s_front" else "_back"))
+
+
+def arm(cx, cz, hy, hz):
+    return {"bottom_front": (cx, -hy, cz - hz), "bottom_back": (cx, hy, cz - hz),
+            "top_front": (cx, -hy, cz + hz), "top_back": (cx, hy, cz + hz)}
+
+
+face = arm_root
+for args in [(0.22, 1.37, 0.055, 0.058),   # shoulder
+             (0.46, 1.37, 0.045, 0.045),   # elbow
+             (0.68, 1.37, 0.035, 0.026),   # wrist
+             (0.80, 1.37, 0.045, 0.015)]:  # hand
+    face = extrude(face)
+    place(face, arm(*args))
+
+# --- Neck and head, up from the inner top face.
+def head(z, x, yf, yb):
+    return {"c_front": (0.0, yf, z), "c_back": (0.0, yb, z), "m_front": (x, yf, z), "m_back": (x, yb, z)}
+
+
+face = neck_root
+for args in [(1.470, 0.045, -0.045, 0.045),   # neck
+             (1.545, 0.070, -0.085, 0.075),   # jaw
+             (1.630, 0.085, -0.090, 0.095),   # widest
+             (1.710, 0.060, -0.060, 0.070)]:  # top (about 1.70 after subdivision)
+    face = extrude(face)
+    place(face, head(*args))
+
+bmesh.ops.recalc_face_normals(bm, faces=bm.faces[:])
+mesh = bpy.data.meshes.new(NAME)
+bm.to_mesh(mesh)
+bm.free()
+for p in mesh.polygons:
+    p.use_smooth = True
+obj = bpy.data.objects.new(NAME, mesh)
+obj.location = LOCATION
+bpy.context.collection.objects.link(obj)  # The active collection, keeping the scene's structure.
+mirror = obj.modifiers.new("Mirror", 'MIRROR')
+mirror.use_clip = True        # Keeps the vertices on the mirror plane while editing.
+mirror.use_mirror_merge = True
+obj.modifiers.new("Subdivision", 'SUBSURF').levels = 2
+result = {"object": obj.name, "vertices": len(mesh.vertices), "faces": len(mesh.polygons)}
+```

@@ -1633,6 +1633,89 @@ class _TestServerMixin:
             content = self._call_tool_expect_error("render_mesh_wireframe_as_image", arguments)
             self.assertIn(message, str(content[0].get("text", "")))
 
+    def test_get_modeling_guide_character(self) -> None:
+        """
+        The guide's example code builds a clean cage: keep it working.
+        """
+        data = self._test_tool("get_modeling_guide", {"topic": "character"})
+        self.assertEqual(data["topic"], "character")
+        guide = str(data["guide"])
+        self.assertIn("get_mesh_topology_summary", guide)
+
+        def example(name: str) -> str:
+            # The code block following the `<!-- example: name -->` marker.
+            after = guide.split("<!-- example: {:s} -->".format(name), 1)[1]
+            return after.split("```python\n", 1)[1].split("```", 1)[0]
+
+        code = example("character")
+
+        data = self._test_tool("execute_blender_code", {"code": code})
+        self.assertEqual(data["object"], "Character")
+
+        data = self._test_tool("get_mesh_topology_summary", {"name": "Character"})
+        self.assertEqual(data["status"], "ok")
+        self.assertEqual(data["islands"]["count"], 1)
+        self.assertEqual(data["faces"]["triangles"]["count"], 0)
+        self.assertEqual(data["faces"]["ngons"]["count"], 0)
+        for key in (
+                "boundary_edges", "non_manifold_edges", "wire_edges",
+                "loose_vertices", "inconsistent_normal_edges",
+        ):
+            self.assertEqual(data[key]["count"], 0, key)
+        (symmetry,) = data["symmetry"]
+        self.assertTrue(symmetry["is_joined"])
+        self.assertEqual(symmetry["off_center_vertices"]["count"], 0)
+        self.assertEqual(symmetry["crossing_faces"]["count"], 0)
+        self.assertEqual(data["warnings"], [])
+        # The poles the guide describes as expected.
+        self.assertEqual(data["poles"]["valence_3"]["count"], 12)
+        self.assertEqual(data["poles"]["valence_5_plus"]["count"], 8)
+        self.assertEqual({p["valence"] for p in data["poles"]["valence_5_plus"]["items"]}, {5})
+
+        # About 1.7 m tall after subdivision, standing on the ground.
+        data = self._test_tool("get_object_geometry_summary", {"names": ["Character"]})
+        bounds = data["objects"][0]["bounds_world"]
+        self.assertAlmostEqual(bounds["size"][2], 1.7, delta=0.02)
+        self.assertAlmostEqual(bounds["min"][2], 0.0, delta=0.01)
+
+        # The ground contact snippet, also with a rotated, scaled and raised parent.
+        def code_parent() -> None:
+            import math
+            import bpy  # type: ignore[import-not-found]
+            parent = bpy.data.objects.new("Parent", None)
+            bpy.context.scene.collection.objects.link(parent)
+            parent.location = (0.0, 0.0, 0.5)
+            parent.rotation_euler = (0.0, 0.0, math.radians(30.0))
+            parent.scale = (2.0, 2.0, 2.0)
+            bpy.data.objects["Character"].parent = parent
+            result = {'ok': True}  # noqa: F841
+        self._test_tool("execute_blender_code", {"code": _python_fn_body_as_string(code_parent)})
+        self._test_tool("execute_blender_code", {"code": example("ground-contact")})
+        data = self._test_tool("get_object_geometry_summary", {"names": ["Character"]})
+        self.assertAlmostEqual(data["objects"][0]["bounds_world"]["min"][2], 0.0, places=4)
+
+        # Tilted (around Y): moving the cage would open the mirror seam, the snippet stops.
+        def code_tilt() -> None:
+            import math
+            import bpy  # type: ignore[import-not-found]
+            parent = bpy.data.objects["Parent"]
+            parent.rotation_euler = (0.0, math.radians(10.0), 0.0)
+            parent.location = (0.0, 0.0, 1.0)
+            result = {'ok': True}  # noqa: F841
+        self._test_tool("execute_blender_code", {"code": _python_fn_body_as_string(code_tilt)})
+        data = self._test_tool("execute_blender_code", {"code": example("ground-contact")})
+        self.assertEqual(data["status"], "error")
+        self.assertIn("mirror seam", str(data["message"]))
+        data = self._test_tool("get_mesh_topology_summary", {"name": "Character"})
+        self.assertEqual(data["symmetry"][0]["off_center_vertices"]["count"], 0)
+
+    def test_get_modeling_guide_error(self) -> None:
+        content = self._call_tool_expect_error("get_modeling_guide", {"topic": "NONEXISTENT"})
+        # Rejected by the argument validation, listing the valid topics.
+        text = str(content[0].get("text", ""))
+        self.assertIn("literal_error", text)
+        self.assertIn("'character'", text)
+
     def test_get_scene_render_summary(self) -> None:
         data = self._test_tool("get_scene_render_summary")
         self.assertEqual(data["status"], "ok")

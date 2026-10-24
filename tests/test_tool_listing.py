@@ -281,6 +281,29 @@ EXPECTED_TOOLS = [
         }
     },
     {
+        "name": "get_modeling_guide",
+        "description": "\n"
+        "Return a step-by-step modeling guide for *topic*, with pitfalls, checks and tested example code.\n"
+        "\n"
+        "Read it before modeling, it doesn't access Blender.\n"
+        "``character``: a character base mesh as a subdivision cage\n"
+        "(box modeling a half body with Mirror and Subdivision Surface modifiers).\n",
+        "inputSchema": {
+            "properties": {
+                "topic": {
+                    "const": "character",
+                    "title": "Topic",
+                    "type": "string"
+                }
+            },
+            "required": [
+                "topic"
+            ],
+            "title": "get_modeling_guideArguments",
+            "type": "object"
+        }
+    },
+    {
         "name": "get_node_tree_summary",
         "description": "\n"
         "Return the nodes of a node tree with their settings, input values and links.\n"
