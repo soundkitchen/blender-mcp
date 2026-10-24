@@ -40,7 +40,9 @@ the selection or the mode:
   Surface modifiers, reusing and reordering existing ones.
 
 Their docstrings (`help(subd.extrude)`) have the details. For example, to add a loop around
-the waist and widen it:
+the waist and widen it. Pick the edge by the indices of its two vertices, as shown by
+`render_mesh_wireframe_as_image`: positions change as you shape the cage, indices don't
+(until vertices are added or removed, look again after that):
 
 <!-- example: insert-loop -->
 ```python
@@ -49,9 +51,10 @@ import blmcp_subd as subd
 
 obj = bpy.data.objects["Character"]
 with subd.edit_mesh(obj) as bm:
-    # A vertical edge of the torso side, between the hips and the waist rings.
-    edge = next(e for e in bm.edges
-                if {round(v.co.z, 2) for v in e.verts} == {0.97, 1.08} and min(v.co.x for v in e.verts) > 0.1)
+    # The torso side edge between the hips (vertex 8) and the waist (vertex 14) in the example.
+    edge = bm.edges.get((bm.verts[8], bm.verts[14]))
+    if edge is None:
+        raise ValueError("Vertices 8 and 14 are not joined by an edge")
     (loop,) = subd.insert_loop(bm, edge)
     for v in loop:
         v.co.x *= 1.1
@@ -119,6 +122,9 @@ origin where it is (e.g. at the feet). The object and its parents may be moved, 
 rotated around `Z` only: when tilted, the offset would move the cage along its own `X` axis,
 off the mirror plane, opening the seam (the code stops instead). Run it in Object Mode:
 in Edit Mode, leaving it writes the edit-mesh back over these changes.
+The cage usually moves down by the shrinkage (`moved_by` is negative, a few millimeters
+for the example), so its sole ends up below the origin: expected, the subdivided result
+is what touches the ground.
 
 <!-- example: ground-contact -->
 ```python
