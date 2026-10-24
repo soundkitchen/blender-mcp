@@ -18,6 +18,7 @@ from blmcp.tools_helpers import (
 from blmcp.tools_helpers.connection import send_code
 from blmcp.tools.get_screenshot_of_area_as_image_toolcode import AreaUIType, Params
 from mcp.server.mcpserver import MCPServer, Image  # pylint: disable=import-error,no-name-in-module
+from mcp.server.mcpserver.exceptions import ToolError  # pylint: disable=import-error,no-name-in-module
 from mcp.types import ToolAnnotations  # pylint: disable=import-error,no-name-in-module
 
 _TOOL_CALL = toolcode_wrap_with_calling_convention(toolcode_load_from_filepath(__file__))
@@ -45,9 +46,9 @@ def register(mcp: MCPServer) -> None:
         p = Params(area_ui_type=area_ui_type, size_limit_in_bytes=size_limit_in_bytes)
         response = send_code(toolcode_format_call(_TOOL_CALL, p), strict_json=True)
         if response.get("status") != "ok":
-            raise RuntimeError(str(response.get("message", "Unknown error")))
+            raise ToolError(str(response.get("message", "Unknown error")))
         result = response["result"]
         assert isinstance(result, dict)
         if result.get("status") != "ok":
-            raise RuntimeError(str(result.get("message", "Unknown error")))
+            raise ToolError(str(result.get("message", "Unknown error")))
         return Image(data=base64.b64decode(str(result["image_base64"])), format="png")

@@ -685,6 +685,115 @@ EXPECTED_TOOLS = [
         }
     },
     {
+        "name": "render_mesh_wireframe_as_image",
+        "description": "\n"
+        "Draw the mesh object *name* in orthographic views with its vertex indices, returned as a PNG image.\n"
+        "\n"
+        "Use while editing a mesh (e.g. a subdivision cage) to see which vertex\n"
+        "index is where, then change vertices by index (``bm.verts[i]`` or\n"
+        "``mesh.vertices[i]``). The indices match ``get_mesh_topology_summary``.\n"
+        "\n"
+        "*views* are drawn side by side at the same scale, in object space\n"
+        "(``FRONT``, ``BACK``, ``RIGHT``, ``LEFT``, ``TOP``, ``BOTTOM`` as in\n"
+        "Blender's numpad views), defaulting to ``FRONT`` and ``RIGHT``.\n"
+        "Each view shows the result after modifiers as a gray silhouette, the\n"
+        "cage (the mesh before modifiers, in Edit Mode including unsynced edits)\n"
+        "with its edges, and the visible vertices with their index. Edges hidden\n"
+        "behind the cage are drawn faintly, hidden vertices are not labeled.\n"
+        "In Edit Mode, elements hidden by the user are not drawn.\n"
+        "\n"
+        "*bounds_min* & *bounds_max* (object space, pass both) limit the drawing\n"
+        "to a box, zooming in on details, e.g. a character's head.\n"
+        "Labels that would overlap are skipped, narrow the bounds to see them.\n"
+        "For a half cage mirrored by a Mirror modifier, view it from the side\n"
+        "of the cage: from the mirror plane side, the open cage shows its inside.\n"
+        "\n"
+        "Returns the image followed by JSON info: ``views`` (each view's screen\n"
+        "axes ``right`` & ``up`` and its ``rect`` in the image: x, y from the\n"
+        "bottom left, width, height), ``image_width`` & ``image_height``,\n"
+        "``units_per_pixel``, the ``bounds_min``\n"
+        "& ``bounds_max`` drawn, ``vertices_labeled``, ``vertices_unlabeled``\n"
+        "(visible but skipped to avoid overlaps, the first 100 indices),\n"
+        "``vertices_hidden`` (behind the cage in every view),\n"
+        "``vertices_outside_bounds`` and, in Edit Mode,\n"
+        "``vertices_hidden_in_edit_mode``. ``rect`` and ``units_per_pixel``\n"
+        "match the returned image, also when it was downscaled.\n"
+        "\n"
+        "*size_limit_in_bytes* is the target image size in bytes.\n"
+        "Zero (the default) uses the MCP message size limit.\n",
+        "inputSchema": {
+            "properties": {
+                "name": {
+                    "title": "Name",
+                    "type": "string"
+                },
+                "views": {
+                    "anyOf": [
+                        {
+                            "items": {
+                                "enum": [
+                                    "FRONT",
+                                    "BACK",
+                                    "RIGHT",
+                                    "LEFT",
+                                    "TOP",
+                                    "BOTTOM"
+                                ],
+                                "type": "string"
+                            },
+                            "type": "array"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": None,
+                    "title": "Views"
+                },
+                "bounds_min": {
+                    "anyOf": [
+                        {
+                            "items": {
+                                "type": "number"
+                            },
+                            "type": "array"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": None,
+                    "title": "Bounds Min"
+                },
+                "bounds_max": {
+                    "anyOf": [
+                        {
+                            "items": {
+                                "type": "number"
+                            },
+                            "type": "array"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": None,
+                    "title": "Bounds Max"
+                },
+                "size_limit_in_bytes": {
+                    "default": 0,
+                    "title": "Size Limit In Bytes",
+                    "type": "integer"
+                }
+            },
+            "required": [
+                "name"
+            ],
+            "title": "render_mesh_wireframe_as_imageArguments",
+            "type": "object"
+        }
+    },
+    {
         "name": "render_thumbnail_as_image",
         "description": "\n"
         "Render a small, low-quality thumbnail and return it as a PNG image (temporarily overrides settings).\n"
