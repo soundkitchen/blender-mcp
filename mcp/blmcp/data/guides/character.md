@@ -37,8 +37,20 @@ converting it to a mesh.
 6. **Shape.** Move vertices by index with `render_mesh_wireframe_as_image` (zoom in with
    `bounds_min`/`bounds_max`), add edge loops where a shape needs more detail
    (`bmesh.ops.subdivide_edgering`).
-7. **Ground contact.** Subdivision shrinks the shape: check the evaluated mesh's lowest point
-   (feet) and lower the cage if it floats.
+7. **Ground contact.** Subdivision shrinks the shape: check the lowest point after modifiers
+   (`bounds_world` of `get_object_geometry_summary`, or the code below) and move the cage
+   down if it floats:
+
+   ```
+   depsgraph = bpy.context.evaluated_depsgraph_get()
+   obj_eval = obj.evaluated_get(depsgraph)
+   mesh_eval = obj_eval.to_mesh()
+   lowest = min((obj_eval.matrix_world @ v.co).z for v in mesh_eval.vertices)
+   obj_eval.to_mesh_clear()
+   for v in obj.data.vertices:
+       v.co.z -= lowest  # Object space, assuming the object is not rotated or scaled.
+   obj.data.update()
+   ```
 
 ## Pitfalls
 
@@ -55,6 +67,8 @@ converting it to a mesh.
   variables before running operators.
 * **Write back.** Changes to a `bmesh.new()` copy only apply after `bm.to_mesh(mesh)`
   (in Edit Mode: `bmesh.update_edit_mesh(mesh)`).
+* **Imports.** Code run by `execute_blender_code` starts with nothing imported:
+  `import bpy` (and `bmesh`, `mathutils`) in every call.
 
 ## Checking
 
@@ -62,14 +76,19 @@ converting it to a mesh.
   the body show up as more), no `boundary_edges` (holes), `non_manifold_edges`,
   `wire_edges`, `loose_vertices` or `inconsistent_normal_edges`, no triangles or n-gons,
   no `off_center_vertices` or `crossing_faces`, and no `warnings`.
+* Expected poles in this layout: 5 edges where the legs, arms and neck leave the torso and
+  in front of the ankle (8), 3 edges at the corners of the head top, hand tip, toe tip and
+  heel back (12). Poles elsewhere, or with 6 or more edges, point to a modeling mistake.
 * `render_mesh_wireframe_as_image` to see the shape and which vertex index is where:
-  `FRONT` and `RIGHT` for the whole body, then zoom in on details. Twisted rings and
-  crossing edges show up here, not in the topology summary.
+  `FRONT` and `RIGHT` for the whole body, `TOP` for the arms (seen from the side they
+  overlap the torso), then zoom in on details. Twisted rings and crossing edges show up
+  here, not in the topology summary.
 * A screenshot or render for the final look.
 
 ## Example
 
-A complete, tested starting point: a 1.7 m base mesh (96 vertices, all quads, one part).
+A complete, tested starting point: a base mesh about 1.7 m tall after subdivision
+(96 vertices, all quads, one part, 12 poles with 3 edges and 8 with 5, see *Checking*).
 Change `HEIGHT`, the ring tables and the per-ring sizes to adapt the proportions,
 then refine by index as described above.
 
@@ -77,7 +96,7 @@ then refine by index as described above.
 import bmesh
 import bpy
 
-NAME = "Human"
+NAME = "Character"    # Check the name is free: Blender appends ".001" on a collision.
 HEIGHT = 1.7          # Meters, the proportions below are for 1.7 and scaled to this.
 LOCATION = (0.0, 0.0, 0.0)
 
@@ -210,10 +229,10 @@ def head(z, x, yf, yb):
 
 
 face = neck_root
-for args in [(1.50, 0.045, -0.045, 0.045),   # neck
-             (1.57, 0.070, -0.085, 0.075),   # jaw
-             (1.66, 0.085, -0.090, 0.095),   # widest
-             (1.75, 0.060, -0.060, 0.070)]:  # top
+for args in [(1.470, 0.045, -0.045, 0.045),   # neck
+             (1.545, 0.070, -0.085, 0.075),   # jaw
+             (1.630, 0.085, -0.090, 0.095),   # widest
+             (1.710, 0.060, -0.060, 0.070)]:  # top (about 1.70 after subdivision)
     face = extrude(face)
     place(face, head(*args))
 

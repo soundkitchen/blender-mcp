@@ -1644,9 +1644,9 @@ class _TestServerMixin:
         code = guide.split("```python\n", 1)[1].split("```", 1)[0]
 
         data = self._test_tool("execute_blender_code", {"code": code})
-        self.assertEqual(data["object"], "Human")
+        self.assertEqual(data["object"], "Character")
 
-        data = self._test_tool("get_mesh_topology_summary", {"name": "Human"})
+        data = self._test_tool("get_mesh_topology_summary", {"name": "Character"})
         self.assertEqual(data["status"], "ok")
         self.assertEqual(data["islands"]["count"], 1)
         self.assertEqual(data["faces"]["triangles"]["count"], 0)
@@ -1661,6 +1661,16 @@ class _TestServerMixin:
         self.assertEqual(symmetry["off_center_vertices"]["count"], 0)
         self.assertEqual(symmetry["crossing_faces"]["count"], 0)
         self.assertEqual(data["warnings"], [])
+        # The poles the guide describes as expected.
+        self.assertEqual(data["poles"]["valence_3"]["count"], 12)
+        self.assertEqual(data["poles"]["valence_5_plus"]["count"], 8)
+        self.assertEqual({p["valence"] for p in data["poles"]["valence_5_plus"]["items"]}, {5})
+
+        # About 1.7 m tall after subdivision, standing on the ground.
+        data = self._test_tool("get_object_geometry_summary", {"names": ["Character"]})
+        bounds = data["objects"][0]["bounds_world"]
+        self.assertAlmostEqual(bounds["size"][2], 1.7, delta=0.02)
+        self.assertAlmostEqual(bounds["min"][2], 0.0, delta=0.01)
 
     def test_get_modeling_guide_error(self) -> None:
         content = self._call_tool_expect_error("get_modeling_guide", {"topic": "NONEXISTENT"})
