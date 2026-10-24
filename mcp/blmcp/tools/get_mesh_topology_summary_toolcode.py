@@ -367,15 +367,18 @@ def _subdivision_size(
     }
 
 
-def _islands(bm: _BMesh, items: _Items) -> list[dict[str, Any]]:
+def _islands(bm: _BMesh, items: _Items) -> dict[str, Any]:
     """
-    Return the connected parts of the mesh, the largest first.
+    Return the parts of the cage with faces that are not connected to each other, the largest first.
 
+    Parts without faces (loose vertices, wire edges) are reported by their own checks.
     Each part has its number of ``vertices`` and ``faces``, its smallest vertex index
     (``first_vertex``) and the ``center`` of its object-space bounds.
     """
     seen: set[Any] = set()
-    result: list[dict[str, Any]] = []
+    # `(vertices, start)`, the start vertex has the smallest index of its part
+    # (parts are found in vertex order).
+    parts: list[tuple[list[Any], Any]] = []
     for start in bm.verts:
         if start in seen:
             continue
@@ -390,18 +393,24 @@ def _islands(bm: _BMesh, items: _Items) -> list[dict[str, Any]]:
                 if other not in seen:
                     seen.add(other)
                     stack.append(other)
-        faces = {f for v in verts for f in v.link_faces}
+        if any(v.link_faces for v in verts):
+            parts.append((verts, start))
+    # A stable sort keeps parts of the same size in vertex order.
+    parts.sort(key=lambda part: -len(part[0]))
+
+    result = []
+    # Only the listed parts need their faces and bounds.
+    for verts, start in parts[:_ITEMS_MAX]:
+        # Defined by `_template_coords_min_max.py`.
+        min_max = _coords_min_max([c for v in verts for c in v.co])
+        assert min_max is not None
         result.append({
             "vertices": len(verts),
-            "faces": len(faces),
-            "first_vertex": min(items.vert_index(v) for v in verts),
-            "center": _round_co([
-                (min(v.co[axis] for v in verts) + max(v.co[axis] for v in verts)) / 2.0
-                for axis in range(3)
-            ]),
+            "faces": len({f for v in verts for f in v.link_faces}),
+            "first_vertex": items.vert_index(start),
+            "center": _round_co([(lo + hi) / 2.0 for lo, hi in zip(*min_max)]),
         })
-    result.sort(key=lambda island: (-island["vertices"], island["first_vertex"]))
-    return result
+    return {"count": len(parts), "items": result}
 
 
 def _topology(obj: _Object, bm: _BMesh, is_edit_mode: bool) -> dict[str, Any]:
@@ -472,7 +481,7 @@ def _topology(obj: _Object, bm: _BMesh, is_edit_mode: bool) -> dict[str, Any]:
         "wire_edges": _listing(wire, items.edge),
         "loose_vertices": _listing(loose, items.vert),
         "inconsistent_normal_edges": _listing(inconsistent, items.edge),
-        "islands": _listing(_islands(bm, items), lambda island: island),
+        "islands": _islands(bm, items),
         "creases": {
             "edges": sum(1 for e in bm.edges if e[crease_edge] > 0.0) if crease_edge is not None else 0,
             "vertices": sum(1 for v in bm.verts if v[crease_vert] > 0.0) if crease_vert is not None else 0,

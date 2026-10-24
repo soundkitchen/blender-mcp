@@ -53,10 +53,13 @@ def register(mcp: MCPServer) -> None:
         faces, ``wire_edges`` none, ``loose_vertices`` have no edges.
         ``inconsistent_normal_edges`` join faces whose normals are flipped
         relative to each other.
-        ``islands`` lists the parts of the cage not connected to each other,
-        the largest first, with their number of ``vertices`` and ``faces``,
-        smallest vertex index (``first_vertex``) and bounds ``center``:
-        e.g. an arm that overlaps the body without being joined to it.
+        ``islands`` lists the parts of the cage with faces that are not
+        connected to each other, the largest first, with their number of
+        ``vertices`` and ``faces``, smallest vertex index (``first_vertex``)
+        and bounds ``center``: e.g. an arm that overlaps the body without
+        being joined to it. They are parts of the cage before modifiers
+        (mirrored copies are not counted), loose vertices and wire edges
+        are not included.
         ``creases`` counts edges and vertices with a crease, ``sharp_edges``
         the edges marked sharp.
 
