@@ -1442,7 +1442,7 @@ class _TestServerMixin:
         self.assertIsNone(data["subdivision_size"])
         self.assertEqual(data["symmetry"], [])
 
-        # The tool reads a copy, the indices of the edit-mesh are not updated.
+        # The tool reads the edit-mesh without updating its indices.
         data_index = self._test_tool("execute_blender_code", {
             "code": (
                 "import bmesh, bpy\n"
