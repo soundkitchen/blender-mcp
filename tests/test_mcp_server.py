@@ -173,6 +173,41 @@ def _call_server_tool(name: str, arguments: dict[str, object]) -> dict[str, Any]
 
 
 # ---------------------------------------------------------------------------
+# Modules registered in Blender (no server needed).
+
+
+class TestBlenderModules(unittest.TestCase):
+    """
+    Verify the setup code that registers ``blmcp/blender_modules`` in Blender.
+    """
+
+    def setUp(self) -> None:
+        _import_blmcp_module()
+        self._mod = importlib.import_module("blmcp.tools_helpers.blender_modules")
+
+    def test_no_setup_without_import(self) -> None:
+        self.assertIsNone(self._mod.blender_modules_setup_code("import bpy\nresult = {}\n"))
+        # Only the whole name counts.
+        self.assertIsNone(self._mod.blender_modules_setup_code("import blmcp_subdivision\n"))
+
+    def test_setup_registers_module(self) -> None:
+        code = self._mod.blender_modules_setup_code("import blmcp_subd as subd\n")
+        self.assertIsNotNone(code)
+        compile(code, "<setup>", "exec")
+        self.assertIn("'blmcp_subd'", code)
+        self.assertIn("def insert_loop(", code)
+
+    def test_module_sources_are_listed(self) -> None:
+        # Each module in `blender_modules` can be registered, and nothing else.
+        modules_dir = os.path.join(_MCP_DIR, "blmcp", "blender_modules")
+        names = sorted(
+            name[:-3] for name in os.listdir(modules_dir)
+            if name.endswith(".py") and name != "__init__.py"
+        )
+        self.assertEqual(names, sorted(self._mod._MODULE_NAMES))  # pylint: disable=protected-access
+
+
+# ---------------------------------------------------------------------------
 # Data file tests (no server needed).
 
 

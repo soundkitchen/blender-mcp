@@ -462,6 +462,44 @@ class _TestServerMixin:
         })
         self.assertEqual(data["value"], 2)
 
+    def test_execute_blender_code_registers_blmcp_subd(self) -> None:
+        """
+        Code that imports ``blmcp_subd`` gets the module, replaced when its source changes.
+        """
+        def code_import() -> None:
+            import sys
+            import blmcp_subd  # type: ignore[import-not-found]
+            result = {  # noqa: F841
+                "id": id(sys.modules["blmcp_subd"]),
+                "has_insert_loop": callable(blmcp_subd.insert_loop),
+            }
+        data = self._test_tool("execute_blender_code", {"code": _python_fn_body_as_string(code_import)})
+        self.assertTrue(data["has_insert_loop"])
+        first_id = data["id"]
+        # Registered again only when the source differs.
+        data = self._test_tool("execute_blender_code", {"code": _python_fn_body_as_string(code_import)})
+        self.assertEqual(data["id"], first_id)
+
+        def code_outdated() -> None:
+            import sys
+            sys.modules["blmcp_subd"].__blmcp_digest__ = "outdated"
+            result = {'ok': True}  # noqa: F841
+        self._test_tool("execute_blender_code", {"code": _python_fn_body_as_string(code_outdated)})
+        data = self._test_tool("execute_blender_code", {"code": _python_fn_body_as_string(code_import)})
+        self.assertNotEqual(data["id"], first_id)
+
+        # Errors in the module show its source lines, the code's line numbers are unchanged.
+        def code_error() -> None:
+            import blmcp_subd  # type: ignore[import-not-found]
+            import bmesh  # type: ignore[import-not-found]
+            blmcp_subd.extrude(bmesh.new(), [])
+        data = self._test_tool("execute_blender_code", {"code": _python_fn_body_as_string(code_error)})
+        self.assertEqual(data["status"], "error")
+        message = str(data["message"])
+        self.assertIn('File "<blmcp_subd>"', message)
+        self.assertIn('raise ValueError("No faces to extrude")', message)
+        self.assertIn('File "<string>", line 3, in <module>', message)
+
     def test_get_blendfile_summary_datablocks(self) -> None:
         data = self._test_tool("get_blendfile_summary_datablocks")
         self.assertEqual(data["scene_name"], "Scene")
@@ -583,6 +621,13 @@ class _TestServerMixin:
             "code": "result = {'version': 1}",
         })
         self.assertEqual(data["version"], 1)
+
+    def test_execute_blender_code_for_cli_blmcp_subd(self) -> None:
+        data = self._test_tool("execute_blender_code_for_cli", {
+            "blend_file": self._blend_path,
+            "code": "import blmcp_subd\nresult = {'ok': callable(blmcp_subd.extrude)}",
+        })
+        self.assertTrue(data["ok"])
 
     def test_get_blendfile_summary_datablocks_for_cli(self) -> None:
         data = self._test_tool("get_blendfile_summary_datablocks_for_cli", {
@@ -1633,6 +1678,117 @@ class _TestServerMixin:
             content = self._call_tool_expect_error("render_mesh_wireframe_as_image", arguments)
             self.assertIn(message, str(content[0].get("text", "")))
 
+    def test_blmcp_subd_helpers(self) -> None:
+        """
+        The ``blmcp_subd`` helpers on a half tube, open on the mirror plane.
+        """
+        def code() -> None:
+            import bpy  # type: ignore[import-not-found]
+            import blmcp_subd as subd  # type: ignore[import-not-found]
+
+            def half_tube(bm, zs):  # type: ignore[no-untyped-def]
+                # Rings of 4 points on the right half, open on X = 0, joined by 3 quads per segment.
+                pts = [(0.0, -1.0), (1.0, -1.0), (1.0, 1.0), (0.0, 1.0)]
+                rings = [[bm.verts.new((x, y, z)) for x, y in pts] for z in zs]
+                for a, b in zip(rings, rings[1:]):
+                    for k in range(3):
+                        bm.faces.new((a[k], a[k + 1], b[k + 1], b[k]))
+                return rings
+
+            def stats(bm):  # type: ignore[no-untyped-def]
+                return {
+                    "verts": len(bm.verts),
+                    "sides": sorted({len(f.verts) for f in bm.faces}),
+                    "wire_edges": sum(1 for e in bm.edges if not e.link_faces),
+                    "faces_on_plane": sum(1 for f in bm.faces if all(abs(v.co.x) < 1e-6 for v in f.verts)),
+                }
+
+            mesh = bpy.data.meshes.new("Tube")
+            obj = bpy.data.objects.new("Tube", mesh)
+            bpy.context.collection.objects.link(obj)
+            result = {}
+            with subd.edit_mesh(obj) as bm:
+                rings = half_tube(bm, (0.0, 1.0, 2.0))
+                # A cap with an edge on the mirror plane: extruding it leaves no face on the plane.
+                top = bm.faces.new(rings[2])
+                ext = subd.extrude(bm, [top])
+                result["extrude_sources"] = sorted(rings[2].index(src) for src in ext.source.values())
+                result["source_same_place"] = all(v.co == src.co for v, src in ext.source.items())
+                for v in ext.faces[0].verts:
+                    v.co.z += 1.0
+                result["extrude"] = stats(bm)
+                result["cap_index_ok"] = bm.faces[ext.faces[0].index] == ext.faces[0]
+
+                # A ring across the 3 quads of the first segment, open on both ends.
+                edge = bm.edges.get((rings[0][1], rings[1][1]))
+                result["ring"] = len(subd.edge_ring(edge))
+                loops = subd.insert_loop(bm, edge, cuts=2)
+                result["loops_z"] = [sorted({round(v.co.z, 3) for v in loop}) for loop in loops]
+                result["loops_x"] = [[round(v.co.x, 3) for v in loop] for loop in loops]
+                result["loop_index_ok"] = all(bm.verts[v.index] == v for loop in loops for v in loop)
+                result["insert_loop"] = stats(bm)
+
+                # Bridge the top ring of a separate tube to the bottom ring of the first one.
+                lower = half_tube(bm, (-3.0, -2.0))
+                faces = subd.bridge_loops(bm, lower[1], rings[0])
+                result["bridge_faces"] = len(faces)
+                bm.normal_update()
+                result["bridge_contiguous"] = all(e.is_contiguous for e in bm.edges if len(e.link_faces) == 2)
+                result["bridge"] = stats(bm)
+            result["mesh_verts"] = len(mesh.vertices)
+
+            # A face is not a ring, a loop needs quads to cut across.
+            with subd.edit_mesh(obj) as bm:
+                wire = bm.edges.new((bm.verts.new((5.0, 0.0, 0.0)), bm.verts.new((6.0, 0.0, 0.0))))
+                try:
+                    subd.insert_loop(bm, wire)
+                except ValueError as ex:
+                    result["wire_error"] = str(ex)
+
+            obj.modifiers.new("Sub", 'SUBSURF')
+            obj.modifiers.new("Mir", 'MIRROR')
+            result["modifiers"] = subd.setup_mirror_subsurf(obj, levels=3)
+            mirror = obj.modifiers["Mir"]
+            result["mirror"] = [tuple(mirror.use_axis), mirror.use_clip, mirror.use_mirror_merge]
+            result["levels"] = obj.modifiers["Sub"].levels
+
+        data = self._test_tool("execute_blender_code", {"code": _python_fn_body_as_string(code)})
+        self.assertEqual(data["extrude_sources"], [0, 1, 2, 3])
+        self.assertTrue(data["source_same_place"])
+        self.assertEqual(data["extrude"], {"verts": 16, "sides": [4], "wire_edges": 0, "faces_on_plane": 0})
+        self.assertTrue(data["cap_index_ok"])
+        self.assertEqual(data["ring"], 4)
+        # From the `edge.verts[0]` side (z = 0), following the ring (x = 0, 1, 1, 0).
+        self.assertEqual(data["loops_z"], [[0.333], [0.667]])
+        self.assertEqual(data["loops_x"], [[0.0, 1.0, 1.0, 0.0]] * 2)
+        self.assertTrue(data["loop_index_ok"])
+        self.assertEqual(data["insert_loop"], {"verts": 24, "sides": [4], "wire_edges": 0, "faces_on_plane": 0})
+        self.assertEqual(data["bridge_faces"], 3)
+        self.assertTrue(data["bridge_contiguous"])
+        self.assertEqual(data["bridge"]["sides"], [4])
+        # Written back to the mesh at the end of the block.
+        self.assertEqual(data["mesh_verts"], 32)
+        self.assertIn("no quad", data["wire_error"])
+        # Mirror moved before subdivision.
+        self.assertEqual(data["modifiers"]["modifiers"], ["Mir", "Sub"])
+        self.assertEqual(data["mirror"], [[True, False, False], True, True])
+        self.assertEqual(data["levels"], 3)
+
+        # Edit Mode: the edit-mesh is updated.
+        def code_edit_mode() -> None:
+            import bpy  # type: ignore[import-not-found]
+            import blmcp_subd as subd  # type: ignore[import-not-found]
+            obj = bpy.data.objects["Tube"]
+            bpy.context.view_layer.objects.active = obj
+            bpy.ops.object.mode_set(mode='EDIT')
+            with subd.edit_mesh(obj) as bm:
+                edge = next(e for e in bm.edges if len(e.link_faces) == 2)
+                count = len(subd.insert_loop(bm, edge)[0])
+            bpy.ops.object.mode_set(mode='OBJECT')
+            result = {"count": count, "verts": len(obj.data.vertices)}  # noqa: F841
+        data = self._test_tool("execute_blender_code", {"code": _python_fn_body_as_string(code_edit_mode)})
+        self.assertEqual(data["verts"], 32 + 2 + data["count"])
+
     def test_get_modeling_guide_character(self) -> None:
         """
         The guide's example code builds a clean cage: keep it working.
@@ -1671,6 +1827,17 @@ class _TestServerMixin:
         self.assertEqual(data["poles"]["valence_3"]["count"], 12)
         self.assertEqual(data["poles"]["valence_5_plus"]["count"], 8)
         self.assertEqual({p["valence"] for p in data["poles"]["valence_5_plus"]["items"]}, {5})
+
+        # The helper example: a loop around the waist, across the 5 faces of the half torso.
+        data = self._test_tool("execute_blender_code", {"code": example("insert-loop")})
+        self.assertEqual(len(data["loop"]), 6)
+        data = self._test_tool("get_mesh_topology_summary", {"name": "Character"})
+        self.assertEqual(data["counts"]["vertices"], 96 + 6)
+        self.assertEqual(data["faces"]["triangles"]["count"] + data["faces"]["ngons"]["count"], 0)
+        self.assertEqual(data["boundary_edges"]["count"], 0)
+        self.assertEqual(data["symmetry"][0]["off_center_vertices"]["count"], 0)
+        self.assertEqual(data["poles"]["valence_3"]["count"], 12)
+        self.assertEqual(data["poles"]["valence_5_plus"]["count"], 8)
 
         # About 1.7 m tall after subdivision, standing on the ground.
         data = self._test_tool("get_object_geometry_summary", {"names": ["Character"]})

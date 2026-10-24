@@ -33,7 +33,10 @@ EXPECTED_TOOLS = [
         "The code runs in Blender's Python environment with full access to ``bpy``.\n"
         "To return data, assign a JSON-serialisable dict to a variable named ``result``.\n"
         "Deferred completion via ``check_is_finished`` is only supported by the\n"
-        "interactive addon server, and is rejected in background mode.\n",
+        "interactive addon server, and is rejected in background mode.\n"
+        "For subdivision cage modeling, ``import blmcp_subd`` gives bmesh helpers\n"
+        "(extrude, insert loops, ...) that don't depend on the 3D view,\n"
+        "see ``get_modeling_guide``.\n",
         "inputSchema": {
             "properties": {
                 "code": {
@@ -54,7 +57,8 @@ EXPECTED_TOOLS = [
         "Execute Python code in a background Blender process.\n"
         "\n"
         "Opens *blend_file* with ``blender --background`` and runs *code*.\n"
-        "Assign a dict to ``result`` to return data.\n",
+        "Assign a dict to ``result`` to return data.\n"
+        "``import blmcp_subd`` works as with ``execute_blender_code``.\n",
         "inputSchema": {
             "properties": {
                 "blend_file": {

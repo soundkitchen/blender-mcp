@@ -150,6 +150,14 @@ requests to Blender.
    Shared utilities used by tools. Tools should not import from each
    other; shared logic lives here instead.
 
+``mcp/blmcp/blender_modules/``
+   Modules that run inside Blender, for code sent with
+   ``execute_blender_code`` (e.g. ``blmcp_subd``, ``bmesh`` helpers for
+   subdivision cage modeling). When the code mentions a module, the server
+   first registers it in Blender's ``sys.modules`` with a separate request
+   (only when its source changed), so the code can ``import`` it.
+   The server itself never imports them.
+
 
 ### Tools
 
