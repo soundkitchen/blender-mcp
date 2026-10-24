@@ -36,12 +36,15 @@ def run_blender_cli(
     blend_file: str,
     code: str,
     timeout: float = _CLI_TIMEOUT,
+    setup_code: str | None = None,
 ) -> dict[str, object]:
     """
     Run Python code inside ``blender --background``.
 
     *blend_file* is the path to the ``.blend`` file to open.
     *code* is executed via ``exec()`` and should assign to ``result``.
+    *setup_code* is executed before it, in a separate namespace
+    (see ``blender_modules_setup_code``).
 
     Returns the JSON-de-serialized ``result`` value.
     """
@@ -50,6 +53,7 @@ def run_blender_cli(
     wrapper = (
         "import json\n"
         "try:\n"
+        "    exec({!r}, {{}})\n"
         "    _ns = {{'result': {{}}}}\n"
         "    exec({!r}, _ns)\n"
         "    _result = _ns['result']\n"
@@ -63,7 +67,7 @@ def run_blender_cli(
         '    print("{:s}" + json.dumps(_result, default=repr))\n'
         "except Exception as ex:\n"
         '    print("{:s}" + json.dumps(str(ex)))\n'
-    ).format(code, _RESULT_PREFIX, _ERROR_PREFIX)
+    ).format(setup_code or "", code, _RESULT_PREFIX, _ERROR_PREFIX)
 
     try:
         proc = subprocess.run(

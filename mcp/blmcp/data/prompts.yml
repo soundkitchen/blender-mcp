@@ -34,7 +34,8 @@ initial_instructions: |
 
   Before modeling a character (or other organic shapes with subdivision surfaces),
   read `get_modeling_guide` (topic `character`): it describes the approach, pitfalls,
-  how to check each step and gives tested example code to start from.
+  how to check each step, the `blmcp_subd` editing helpers and gives tested example code
+  to start from.
 
   # Executing Code
 

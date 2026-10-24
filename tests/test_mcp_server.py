@@ -173,6 +173,65 @@ def _call_server_tool(name: str, arguments: dict[str, object]) -> dict[str, Any]
 
 
 # ---------------------------------------------------------------------------
+# Modules registered in Blender (no server needed).
+
+
+class TestBlenderModules(unittest.TestCase):
+    """
+    Verify the setup code that registers ``blmcp/blender_modules`` in Blender.
+    """
+
+    def setUp(self) -> None:
+        _import_blmcp_module()
+        self._mod = importlib.import_module("blmcp.tools_helpers.blender_modules")
+
+    def test_no_setup_without_import(self) -> None:
+        self.assertIsNone(self._mod.blender_modules_setup_code("import bpy\nresult = {}\n"))
+        # Only the whole name counts.
+        self.assertIsNone(self._mod.blender_modules_setup_code("import blmcp_subdivision\n"))
+
+    def test_setup_registers_module(self) -> None:
+        code = self._mod.blender_modules_setup_code("import blmcp_subd as subd\n")
+        self.assertIsNotNone(code)
+        compile(code, "<setup>", "exec")
+        self.assertIn("'blmcp_subd'", code)
+        self.assertIn("def insert_loop(", code)
+
+    def _register(self, code: str, digests: dict[str, object]) -> list[str]:
+        # Call `blender_modules_register` with Blender reporting *digests*, return the codes sent.
+        sent: list[str] = []
+
+        def send_code(code: str, strict_json: bool) -> dict[str, object]:
+            sent.append(code)
+            return {"status": "ok", "result": digests if len(sent) == 1 else {}}
+        with mock.patch.object(self._mod, "send_code", send_code):
+            self.assertIsNone(self._mod.blender_modules_register(code))
+        return sent
+
+    def test_register_sends_source_only_when_outdated(self) -> None:
+        self.assertEqual(self._register("import bpy\n", {}), [])
+        digest = self._mod._module_source("blmcp_subd")[1]  # pylint: disable=protected-access
+        # Registered with the same source: only the digests are asked for.
+        sent = self._register("import blmcp_subd\n", {"blmcp_subd": digest})
+        self.assertEqual(len(sent), 1)
+        self.assertNotIn("def insert_loop(", sent[0])
+        # Missing or outdated: the source follows.
+        for registered in (None, "outdated"):
+            sent = self._register("import blmcp_subd\n", {"blmcp_subd": registered})
+            self.assertEqual(len(sent), 2)
+            self.assertIn("def insert_loop(", sent[1])
+
+    def test_module_sources_are_listed(self) -> None:
+        # Each module in `blender_modules` can be registered, and nothing else.
+        modules_dir = os.path.join(_MCP_DIR, "blmcp", "blender_modules")
+        names = sorted(
+            name[:-3] for name in os.listdir(modules_dir)
+            if name.endswith(".py") and name != "__init__.py"
+        )
+        self.assertEqual(names, sorted(self._mod._MODULE_NAMES))  # pylint: disable=protected-access
+
+
+# ---------------------------------------------------------------------------
 # Data file tests (no server needed).
 
 

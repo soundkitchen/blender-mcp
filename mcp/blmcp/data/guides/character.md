@@ -21,6 +21,47 @@ branches (chest to shoulders, pelvis to legs) it often makes separate parts, pol
 8 edges and triangles that need manual repair. If you use it, check `islands` right after
 converting it to a mesh.
 
+## Helpers
+
+`import blmcp_subd as subd` in `execute_blender_code` gives `bmesh` helpers for the cage.
+Unlike `bpy.ops.mesh` operators (e.g. `loopcut_slide`), they don't depend on the 3D view,
+the selection or the mode:
+
+* `subd.edit_mesh(obj)`: `with subd.edit_mesh(obj) as bm:` gives the mesh as a `bmesh` and
+  writes it back at the end, in Object Mode and Edit Mode.
+* `subd.extrude(bm, faces)`: extrudes the faces as one region, removes the original faces and
+  the faces left on the mirror plane. Returns the new `faces` and `source`, mapping each new
+  vertex to the vertex it came from.
+* `subd.edge_ring(edge)`: the edges across the row of quads through `edge`.
+* `subd.insert_loop(bm, edge, cuts=1)`: inserts edge loops across that ring, returns the new
+  vertices (one list per loop, following the ring).
+* `subd.bridge_loops(bm, loop_a, loop_b)`: joins two rows of vertices with quads.
+* `subd.setup_mirror_subsurf(obj, levels=2)`: the Mirror (merge, clipping) then Subdivision
+  Surface modifiers, reusing and reordering existing ones.
+
+Their docstrings (`help(subd.extrude)`) have the details. For example, to add a loop around
+the waist and widen it. Pick the edge by the indices of its two vertices, as shown by
+`render_mesh_wireframe_as_image`: positions change as you shape the cage, indices don't
+(until vertices are added or removed, look again after that):
+
+<!-- example: insert-loop -->
+```python
+import bpy
+import blmcp_subd as subd
+
+obj = bpy.data.objects["Character"]
+with subd.edit_mesh(obj) as bm:
+    # The torso side edge between the hips (vertex 8) and the waist (vertex 14) in the example.
+    edge = bm.edges.get((bm.verts[8], bm.verts[14]))
+    if edge is None:
+        raise ValueError("Vertices 8 and 14 are not joined by an edge")
+    (loop,) = subd.insert_loop(bm, edge)
+    for v in loop:
+        v.co.x *= 1.1
+    # Read the indices inside the block: the bmesh is freed at its end.
+    result = {"loop": [v.index for v in loop]}
+```
+
 ## Steps
 
 1. **Check the scene units** (`scene.unit_settings`), sizes below are in meters for a
@@ -36,7 +77,7 @@ converting it to a mesh.
 5. **Neck and head.** Extrude the inner top face up: neck, jaw, widest part of the skull, top.
 6. **Shape.** Move vertices by index with `render_mesh_wireframe_as_image` (zoom in with
    `bounds_min`/`bounds_max`), add edge loops where a shape needs more detail
-   (`bmesh.ops.subdivide_edgering`).
+   (`subd.insert_loop`, see *Helpers*).
 7. **Ground contact.** Subdivision shrinks the shape: check the lowest point after modifiers
    (`bounds_world` of `get_object_geometry_summary`) and move the cage so it touches the
    ground, see *Ground contact* below.
@@ -45,19 +86,19 @@ converting it to a mesh.
 
 * **Faces on the mirror plane.** Extruding a face with an edge on `X = 0` creates a face on
   the plane, deleting it leaves a wire edge across the ring. Both end up inside the mirrored
-  mesh: delete them after each such extrusion (the example below does).
+  mesh: `subd.extrude` deletes them, delete them yourself when extruding with `bmesh.ops`.
 * **Assign roles by connectivity, not position.** After an extrusion, the new vertices sit
   where the old ones were. Telling them apart by sorting positions breaks when rings are not
   aligned (e.g. the front of a heel block, wider at the bottom than at the ankle), twisting
   the next ring. Give each vertex a role and let extruded vertices inherit the role of the
-  vertex they came from.
+  vertex they came from (`source` of `subd.extrude`).
 * **Stale lookup tables.** After creating or deleting elements, `bm.verts[i]` raises until
-  `bm.verts.ensure_lookup_table()` is called again. Resolve the vertices you need into
-  variables before running operators.
+  `bm.verts.ensure_lookup_table()` is called again (the `subd` helpers do it). Resolve the
+  vertices you need into variables before running operators.
 * **Write back.** Changes to a `bmesh.new()` copy only apply after `bm.to_mesh(mesh)`
-  (in Edit Mode: `bmesh.update_edit_mesh(mesh)`).
+  (in Edit Mode: `bmesh.update_edit_mesh(mesh)`), `subd.edit_mesh` does it for you.
 * **Imports.** Code run by `execute_blender_code` starts with nothing imported:
-  `import bpy` (and `bmesh`, `mathutils`) in every call.
+  `import bpy` (and `bmesh`, `mathutils`, `blmcp_subd`) in every call.
 
 ## Checking
 
@@ -81,6 +122,9 @@ origin where it is (e.g. at the feet). The object and its parents may be moved, 
 rotated around `Z` only: when tilted, the offset would move the cage along its own `X` axis,
 off the mirror plane, opening the seam (the code stops instead). Run it in Object Mode:
 in Edit Mode, leaving it writes the edit-mesh back over these changes.
+The cage usually moves down by the shrinkage (`moved_by` is negative, a few millimeters
+for the example), so its sole ends up below the origin: expected, the subdivided result
+is what touches the ground.
 
 <!-- example: ground-contact -->
 ```python
@@ -115,6 +159,7 @@ then refine by index as described above.
 ```python
 import bmesh
 import bpy
+import blmcp_subd as subd
 
 NAME = "Character"    # Check the name is free: Blender appends ".001" on a collision.
 HEIGHT = 1.7          # Meters, the proportions below are for 1.7 and scaled to this.
@@ -136,24 +181,10 @@ def ring(points, names):
 
 def extrude(face):
     """Extrude *face*, return the new cap face. New vertices inherit the roles of their sources."""
-    old = set(face.verts)
-    edges = set(face.edges)
-    res = bmesh.ops.extrude_face_region(bm, geom=[face])
-    cap = next(g for g in res["geom"] if isinstance(g, bmesh.types.BMFace))
-    for v in cap.verts:
-        src = next(e.other_vert(v) for e in v.link_edges if e.other_vert(v) in old)
+    res = subd.extrude(bm, [face])  # Also cleans up the faces left on the mirror plane.
+    for v, src in res.source.items():
         role[v] = role[src]
-    bmesh.ops.delete(bm, geom=[face], context='FACES_ONLY')
-    # Extruding a face with an edge on the mirror plane (X=0) leaves a face on the plane,
-    # and deleting it leaves a wire edge across the ring: both would be inside the mirrored mesh.
-    # Only the new side faces (around the cap) and the edges of the deleted faces need checking.
-    sides = {f for v in cap.verts for f in v.link_faces if f is not cap}
-    on_plane = [f for f in sides if all(abs(v.co.x) < 1e-6 for v in f.verts)]
-    for f in on_plane:
-        edges.update(f.edges)
-    bmesh.ops.delete(bm, geom=on_plane, context='FACES_ONLY')
-    bmesh.ops.delete(bm, geom=[e for e in edges if e.is_valid and not e.link_faces], context='EDGES')
-    return cap
+    return res.faces[0]
 
 
 def place(face, positions):
@@ -270,9 +301,6 @@ for p in mesh.polygons:
 obj = bpy.data.objects.new(NAME, mesh)
 obj.location = LOCATION
 bpy.context.collection.objects.link(obj)  # The active collection, keeping the scene's structure.
-mirror = obj.modifiers.new("Mirror", 'MIRROR')
-mirror.use_clip = True        # Keeps the vertices on the mirror plane while editing.
-mirror.use_mirror_merge = True
-obj.modifiers.new("Subdivision", 'SUBSURF').levels = 2
+subd.setup_mirror_subsurf(obj, levels=2)
 result = {"object": obj.name, "vertices": len(mesh.vertices), "faces": len(mesh.polygons)}
 ```

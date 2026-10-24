@@ -9,6 +9,7 @@ __all__ = (
 )
 
 from blmcp.tools_helpers.blender_cli import run_blender_cli, synced_blend_for_cli
+from blmcp.tools_helpers.blender_modules import blender_modules_register, blender_modules_setup_code
 from blmcp.tools_helpers.connection import send_code
 from mcp.server.mcpserver import MCPServer  # pylint: disable=import-error,no-name-in-module
 from mcp.types import ToolAnnotations  # pylint: disable=import-error,no-name-in-module
@@ -29,7 +30,13 @@ def register(mcp: MCPServer) -> None:
         To return data, assign a JSON-serialisable dict to a variable named ``result``.
         Deferred completion via ``check_is_finished`` is only supported by the
         interactive addon server, and is rejected in background mode.
+        For subdivision cage modeling, ``import blmcp_subd`` gives bmesh helpers
+        (extrude, insert loops, ...) that don't depend on the 3D view,
+        see ``get_modeling_guide``.
         """
+        error = blender_modules_register(code)
+        if error is not None:
+            return error
         # Not strict: LLM-generated code may return non-JSON-serializable values
         # (e.g. Blender objects). Use `repr` as a fallback instead of erroring.
         return send_code(code, strict_json=False)
@@ -46,10 +53,11 @@ def register(mcp: MCPServer) -> None:
 
         Opens *blend_file* with ``blender --background`` and runs *code*.
         Assign a dict to ``result`` to return data.
+        ``import blmcp_subd`` works as with ``execute_blender_code``.
         """
         # LLM-generated code may return non-JSON-serializable values
         # (e.g. Blender objects), handled by `run_blender_cli` via `default=repr`.
         with synced_blend_for_cli(blend_file) as synced_path:
-            value = run_blender_cli(synced_path, code)
+            value = run_blender_cli(synced_path, code, setup_code=blender_modules_setup_code(code))
             assert isinstance(value, dict), "Expected dict from `run_blender_cli`, got {!r}".format(type(value))
             return value
