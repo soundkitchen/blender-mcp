@@ -68,9 +68,13 @@ def edit_mesh(obj: _Object) -> Iterator[_BMesh]:
     mesh = obj.data
     if mesh.is_editmode:
         bm = bmesh.from_edit_mesh(mesh)
-        _update_indices(bm)
-        yield bm
-        bmesh.update_edit_mesh(mesh)
+        try:
+            _update_indices(bm)
+            yield bm
+        finally:
+            # Also after an exception: the edit-mesh keeps the changes made before it,
+            # its caches must match them.
+            bmesh.update_edit_mesh(mesh)
         return
     bm = bmesh.new()
     try:
@@ -113,6 +117,8 @@ def extrude(bm: _BMesh, faces: Iterable[_BMFace]) -> Extruded:
     and the edges left without faces are removed, they would be inside the mirrored mesh.
     Use ``source`` to carry information from the old vertices to the new ones, e.g. a
     role name: ``{v: role[src] for v, src in result.source.items()}``.
+    Raises ``ValueError`` (leaving the mesh as it was) when a vertex inside the region
+    overlaps another vertex of the faces: merge them first.
     The indices and lookup tables of *bm* are updated.
     """
     faces = list(faces)
@@ -120,9 +126,12 @@ def extrude(bm: _BMesh, faces: Iterable[_BMFace]) -> Extruded:
         raise ValueError("No faces to extrude")
     old_verts = {v for f in faces for v in f.verts}
     old_edges = {e for f in faces for e in f.edges}
-    # The new vertices are created at the position of their source. Inner vertices
-    # (without an edge to their source) are matched by position.
-    old_by_co = {v.co.to_tuple(): v for v in old_verts}
+    # The new vertices are created at the position of their source. Inner vertices (without
+    # an edge to their source) are matched by position: it must be unique among the sources.
+    # (A temporary attribute would be exact, but adding one invalidates the caller's vertices.)
+    old_by_co: dict[tuple[float, ...], list[_BMVert]] = {}
+    for v in old_verts:
+        old_by_co.setdefault(v.co.to_tuple(), []).append(v)
 
     res = bmesh.ops.extrude_face_region(bm, geom=faces)
     new_faces = [g for g in res["geom"] if isinstance(g, bmesh.types.BMFace)]
@@ -130,7 +139,17 @@ def extrude(bm: _BMesh, faces: Iterable[_BMFace]) -> Extruded:
     source = {}
     for v in new_verts:
         src = next((e.other_vert(v) for e in v.link_edges if e.other_vert(v) in old_verts), None)
-        source[v] = src if src is not None else old_by_co[v.co.to_tuple()]
+        if src is None:
+            candidates = old_by_co.get(v.co.to_tuple(), [])
+            if len(candidates) != 1:
+                # Undo the extrusion: delete the new geometry, the original faces are still there.
+                bmesh.ops.delete(bm, geom=new_verts, context='VERTS')
+                raise ValueError(
+                    "Vertices {:s} of the faces to extrude overlap, merge them first".format(
+                        str(sorted(c.index for c in candidates)))
+                )
+            src = candidates[0]
+        source[v] = src
     # Sort the new faces like the given faces, matched by their source vertices.
     order = {frozenset(f.verts): i for i, f in enumerate(faces)}
     new_faces.sort(key=lambda f: order[frozenset(source[v] for v in f.verts)])
@@ -200,8 +219,13 @@ def insert_loop(bm: _BMesh, edge: _BMEdge, cuts: int = 1) -> list[list[_BMVert]]
         starts[cur] = _end_beside(prev, cur, starts[prev])
     # The ring edges are replaced by the subdivision: keep their ends.
     ends = [(starts[e], e.other_vert(starts[e])) for e in ring]
+    for start, end in ends:
+        if (end.co - start.co).length_squared == 0.0:
+            raise ValueError("The ring edge between vertices {:d} and {:d} has no length".format(
+                start.index, end.index))
+    # The vertices next to the ends before the cut: the walk below only steps on new ones.
+    old_near = {w for pair in ends for v in pair for e in v.link_edges for w in e.verts}
 
-    old_verts = set(bm.verts)
     bmesh.ops.subdivide_edgering(bm, edges=ring, cuts=cuts)
     # Each ring edge is now a chain of edges: walk it from its start to its end.
     columns = []
@@ -209,10 +233,13 @@ def insert_loop(bm: _BMesh, edge: _BMEdge, cuts: int = 1) -> list[list[_BMVert]]
         column = []
         prev, v = None, start
         while True:
-            v_next = next(
+            v_next = next((
                 w for w in (e2.other_vert(v) for e2 in v.link_edges)
-                if w is not prev and (w is end or w not in old_verts) and _is_between(w, start, end)
-            )
+                if w is not prev and (w is end or w not in old_near) and _is_between(w, start, end)
+            ), None)
+            if v_next is None:
+                raise RuntimeError("Could not follow the cut edge between vertices {:d} and {:d}".format(
+                    start.index, end.index))
             if v_next is end:
                 break
             column.append(v_next)
@@ -223,10 +250,14 @@ def insert_loop(bm: _BMesh, edge: _BMEdge, cuts: int = 1) -> list[list[_BMVert]]
 
 
 def _end_beside(prev: _BMEdge, cur: _BMEdge, prev_start: _BMVert) -> _BMVert:
-    # The end of `cur` joined to `prev_start` by an edge.
-    for v in cur.verts:
-        if any(e.other_vert(v) is prev_start for e in v.link_edges):
-            return v
+    # The end of `cur` next to `prev_start` in the quad between `prev` and `cur`.
+    face = next((f for f in prev.link_faces if cur in f.edges), None)
+    if face is not None:
+        for loop in face.loops:
+            if loop.vert is prev_start:
+                for v in (loop.link_loop_next.vert, loop.link_loop_prev.vert):
+                    if v in cur.verts:
+                        return v
     raise RuntimeError("The edges of the ring are not joined by quads")
 
 
@@ -248,7 +279,8 @@ def bridge_loops(bm: _BMesh, loop_a: Sequence[_BMVert], loop_b: Sequence[_BMVert
     *loop_a* and *loop_b* are vertices joined by edges, in order, with the same number of
     vertices. A loop is closed when an edge joins its last vertex to its first.
     Open loops ending on the mirror plane bridge the right half of a ring.
-    The normals of the faces connected to the new ones are recalculated to point outwards.
+    The new faces are oriented like the existing faces next to them (or outwards, when
+    there are none), other faces are left as they are.
     The indices and lookup tables of *bm* are updated.
     """
     if len(loop_a) != len(loop_b):
@@ -267,23 +299,22 @@ def bridge_loops(bm: _BMesh, loop_a: Sequence[_BMVert], loop_b: Sequence[_BMVert
         if bm.faces.get(quad) is not None:
             raise ValueError("A face already joins vertices {:s}".format(str([v.index for v in quad])))
         faces.append(bm.faces.new(quad))
-    # Orient the new faces like the faces around them.
-    bmesh.ops.recalc_face_normals(bm, faces=list(_connected_faces(faces)))
+    # The new faces wind the same way. Across an edge shared with an existing face, the
+    # two faces must go through the edge in opposite directions, flip them otherwise.
+    new_faces = set(faces)
+    neighbor = next((
+        (loop, other) for f in faces for loop in f.loops for other in loop.edge.link_loops
+        if other.face not in new_faces
+    ), None)
+    if neighbor is None:
+        bmesh.ops.recalc_face_normals(bm, faces=faces)
+    elif neighbor[0].vert is neighbor[1].vert:
+        for f in faces:
+            f.normal_flip()
+    for f in faces:
+        f.normal_update()
     _update_indices(bm)
     return faces
-
-
-def _connected_faces(faces: Iterable[_BMFace]) -> set[_BMFace]:
-    seen = set(faces)
-    stack = list(seen)
-    while stack:
-        f = stack.pop()
-        for e in f.edges:
-            for f2 in e.link_faces:
-                if f2 not in seen:
-                    seen.add(f2)
-                    stack.append(f2)
-    return seen
 
 
 def setup_mirror_subsurf(obj: _Object, levels: int = 2) -> dict[str, Any]:
@@ -292,7 +323,7 @@ def setup_mirror_subsurf(obj: _Object, levels: int = 2) -> dict[str, Any]:
 
     Existing modifiers are reused (the first Mirror without a mirror object and the first
     Subdivision Surface), created when missing and moved so Mirror comes before Subdivision
-    Surface. Other modifiers are left as they are.
+    Surface. The ``Y`` and ``Z`` axes of a reused Mirror and other modifiers are left as they are.
     Return the names of the modifiers, in their final order.
     """
     if obj.type != 'MESH':
@@ -300,8 +331,8 @@ def setup_mirror_subsurf(obj: _Object, levels: int = 2) -> dict[str, Any]:
     mods = obj.modifiers
     mirror = next((m for m in mods if m.type == 'MIRROR' and m.mirror_object is None), None)
     if mirror is None:
-        mirror = mods.new("Mirror", 'MIRROR')
-    mirror.use_axis = (True, False, False)
+        mirror = mods.new("Mirror", 'MIRROR')  # Only `X` is enabled for a new one.
+    mirror.use_axis[0] = True
     mirror.use_mirror_merge = True
     mirror.use_clip = True
     subsurf = next((m for m in mods if m.type == 'SUBSURF'), None)

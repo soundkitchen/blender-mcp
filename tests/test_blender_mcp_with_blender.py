@@ -1746,7 +1746,8 @@ class _TestServerMixin:
                     result["wire_error"] = str(ex)
 
             obj.modifiers.new("Sub", 'SUBSURF')
-            obj.modifiers.new("Mir", 'MIRROR')
+            # A Mirror on Y too: kept, X is added.
+            obj.modifiers.new("Mir", 'MIRROR').use_axis = (False, True, False)
             result["modifiers"] = subd.setup_mirror_subsurf(obj, levels=3)
             mirror = obj.modifiers["Mir"]
             result["mirror"] = [tuple(mirror.use_axis), mirror.use_clip, mirror.use_mirror_merge]
@@ -1771,10 +1772,10 @@ class _TestServerMixin:
         self.assertIn("no quad", data["wire_error"])
         # Mirror moved before subdivision.
         self.assertEqual(data["modifiers"]["modifiers"], ["Mir", "Sub"])
-        self.assertEqual(data["mirror"], [[True, False, False], True, True])
+        self.assertEqual(data["mirror"], [[True, True, False], True, True])
         self.assertEqual(data["levels"], 3)
 
-        # Edit Mode: the edit-mesh is updated.
+        # Edit Mode: the edit-mesh is updated, also when the block raises.
         def code_edit_mode() -> None:
             import bpy  # type: ignore[import-not-found]
             import blmcp_subd as subd  # type: ignore[import-not-found]
@@ -1784,10 +1785,103 @@ class _TestServerMixin:
             with subd.edit_mesh(obj) as bm:
                 edge = next(e for e in bm.edges if len(e.link_faces) == 2)
                 count = len(subd.insert_loop(bm, edge)[0])
+            try:
+                with subd.edit_mesh(obj) as bm:
+                    edge = next(e for e in bm.edges if len(e.link_faces) == 2)
+                    count += len(subd.insert_loop(bm, edge)[0])
+                    raise KeyError("stop")
+            except KeyError:
+                pass
             bpy.ops.object.mode_set(mode='OBJECT')
             result = {"count": count, "verts": len(obj.data.vertices)}  # noqa: F841
         data = self._test_tool("execute_blender_code", {"code": _python_fn_body_as_string(code_edit_mode)})
         self.assertEqual(data["verts"], 32 + 2 + data["count"])
+
+    def test_blmcp_subd_helpers_edge_cases(self) -> None:
+        """
+        ``blmcp_subd`` with overlapping vertices, extra edges and an open half cage.
+        """
+        def code() -> None:
+            import bmesh  # type: ignore[import-not-found]
+            import blmcp_subd as subd  # type: ignore[import-not-found]
+
+            def half_tube(bm, zs):  # type: ignore[no-untyped-def]
+                pts = [(0.0, -1.0), (1.0, -1.0), (1.0, 1.0), (0.0, 1.0)]
+                rings = [[bm.verts.new((x, y, z)) for x, y in pts] for z in zs]
+                for a, b in zip(rings, rings[1:]):
+                    for k in range(3):
+                        bm.faces.new((a[k], a[k + 1], b[k + 1], b[k]))
+                return rings
+
+            result = {}
+            # Two quads side by side, not merged: their touching corners overlap.
+            bm = bmesh.new()
+            quads = [
+                [bm.verts.new(co) for co in ((x, 0.0, 0.0), (x + 1.0, 0.0, 0.0), (x + 1.0, 1.0, 0.0), (x, 1.0, 0.0))]
+                for x in (0.0, 1.0)
+            ]
+            faces = [bm.faces.new(q) for q in quads]
+            ext = subd.extrude(bm, faces)
+            result["overlap_sources"] = [
+                {ext.source[v] for v in cap.verts} == set(q) for cap, q in zip(ext.faces, quads)
+            ]
+            bm.free()
+
+            # An inner vertex (the center of a 2x2 grid) overlapped by another vertex to extrude:
+            # its source is ambiguous, the extrusion stops and leaves the mesh as it was.
+            bm = bmesh.new()
+            bmesh.ops.create_grid(bm, x_segments=2, y_segments=2, size=1.0)
+            corner = [bm.verts.new(co) for co in ((0.0, 0.0, 0.0), (-1.0, 0.0, 0.0), (-1.0, -1.0, 0.0), (0.0, -1.0, 0.0))]
+            bm.faces.new(corner)
+            counts = (len(bm.verts), len(bm.edges), len(bm.faces))
+            try:
+                subd.extrude(bm, list(bm.faces))
+            except ValueError as ex:
+                result["overlap_error"] = str(ex)
+            result["overlap_unchanged"] = (len(bm.verts), len(bm.edges), len(bm.faces)) == counts
+            bm.free()
+
+            # Bridging an open half tube leaves the normals of its faces as they are.
+            bm = bmesh.new()
+            upper = half_tube(bm, (2.0, 3.0))
+            lower = half_tube(bm, (0.0, 1.0))
+            bm.normal_update()
+            before = {f: f.normal.copy() for f in bm.faces}
+            faces = subd.bridge_loops(bm, lower[1], upper[0])
+            result["kept_normals"] = all(f.normal.dot(n) > 0.99 for f, n in before.items())
+            result["bridge_contiguous"] = all(e.is_contiguous for e in bm.edges if len(e.link_faces) == 2)
+            bm.free()
+
+            # An extra edge from a ring end to the far end of the next ring edge (across a quad)
+            # doesn't flip the order of the loop.
+            bm = bmesh.new()
+            rings = half_tube(bm, (0.0, 1.0))
+            bm.edges.new((rings[0][1], rings[1][2]))
+            edge = bm.edges.get((rings[0][1], rings[1][1]))
+            (loop,) = subd.insert_loop(bm, edge)
+            result["diagonal_loop_z"] = sorted({round(v.co.z, 3) for v in loop})
+            result["diagonal_loop_x"] = [round(v.co.x, 3) for v in loop]
+            bm.free()
+
+            # A ring edge without length.
+            bm = bmesh.new()
+            rings = half_tube(bm, (0.0, 1.0))
+            rings[1][2].co = rings[0][2].co
+            try:
+                subd.insert_loop(bm, bm.edges.get((rings[0][1], rings[1][1])))
+            except ValueError as ex:
+                result["zero_length_error"] = str(ex)
+            bm.free()
+
+        data = self._test_tool("execute_blender_code", {"code": _python_fn_body_as_string(code)})
+        self.assertEqual(data["overlap_sources"], [True, True])
+        self.assertIn("overlap", data["overlap_error"])
+        self.assertTrue(data["overlap_unchanged"])
+        self.assertTrue(data["kept_normals"])
+        self.assertTrue(data["bridge_contiguous"])
+        self.assertEqual(data["diagonal_loop_z"], [0.5])
+        self.assertEqual(data["diagonal_loop_x"], [0.0, 1.0, 1.0, 0.0])
+        self.assertIn("no length", data["zero_length_error"])
 
     def test_get_modeling_guide_character(self) -> None:
         """

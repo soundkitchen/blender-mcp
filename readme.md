@@ -154,8 +154,9 @@ requests to Blender.
    Modules that run inside Blender, for code sent with
    ``execute_blender_code`` (e.g. ``blmcp_subd``, ``bmesh`` helpers for
    subdivision cage modeling). When the code mentions a module, the server
-   first registers it in Blender's ``sys.modules`` with a separate request
-   (only when its source changed), so the code can ``import`` it.
+   first asks Blender which version of it is registered in ``sys.modules``
+   and, when it is missing or its source changed, registers it with a separate
+   request, so the code can ``import`` it.
    The server itself never imports them.
 
 

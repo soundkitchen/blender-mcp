@@ -9,7 +9,7 @@ __all__ = (
 )
 
 from blmcp.tools_helpers.blender_cli import run_blender_cli, synced_blend_for_cli
-from blmcp.tools_helpers.blender_modules import blender_modules_setup_code
+from blmcp.tools_helpers.blender_modules import blender_modules_register, blender_modules_setup_code
 from blmcp.tools_helpers.connection import send_code
 from mcp.server.mcpserver import MCPServer  # pylint: disable=import-error,no-name-in-module
 from mcp.types import ToolAnnotations  # pylint: disable=import-error,no-name-in-module
@@ -34,11 +34,9 @@ def register(mcp: MCPServer) -> None:
         (extrude, insert loops, ...) that don't depend on the 3D view,
         see ``get_modeling_guide``.
         """
-        setup = blender_modules_setup_code(code)
-        if setup is not None:
-            response = send_code(setup, strict_json=True)
-            if response.get("status") != "ok":
-                return response
+        error = blender_modules_register(code)
+        if error is not None:
+            return error
         # Not strict: LLM-generated code may return non-JSON-serializable values
         # (e.g. Blender objects). Use `repr` as a fallback instead of erroring.
         return send_code(code, strict_json=False)

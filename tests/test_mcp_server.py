@@ -197,6 +197,30 @@ class TestBlenderModules(unittest.TestCase):
         self.assertIn("'blmcp_subd'", code)
         self.assertIn("def insert_loop(", code)
 
+    def _register(self, code: str, digests: dict[str, object]) -> list[str]:
+        # Call `blender_modules_register` with Blender reporting *digests*, return the codes sent.
+        sent: list[str] = []
+
+        def send_code(code: str, strict_json: bool) -> dict[str, object]:
+            sent.append(code)
+            return {"status": "ok", "result": digests if len(sent) == 1 else {}}
+        with mock.patch.object(self._mod, "send_code", send_code):
+            self.assertIsNone(self._mod.blender_modules_register(code))
+        return sent
+
+    def test_register_sends_source_only_when_outdated(self) -> None:
+        self.assertEqual(self._register("import bpy\n", {}), [])
+        digest = self._mod._module_source("blmcp_subd")[1]  # pylint: disable=protected-access
+        # Registered with the same source: only the digests are asked for.
+        sent = self._register("import blmcp_subd\n", {"blmcp_subd": digest})
+        self.assertEqual(len(sent), 1)
+        self.assertNotIn("def insert_loop(", sent[0])
+        # Missing or outdated: the source follows.
+        for registered in (None, "outdated"):
+            sent = self._register("import blmcp_subd\n", {"blmcp_subd": registered})
+            self.assertEqual(len(sent), 2)
+            self.assertIn("def insert_loop(", sent[1])
+
     def test_module_sources_are_listed(self) -> None:
         # Each module in `blender_modules` can be registered, and nothing else.
         modules_dir = os.path.join(_MCP_DIR, "blmcp", "blender_modules")
