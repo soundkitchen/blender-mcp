@@ -1204,6 +1204,7 @@ class _TestServerMixin:
         self.assertEqual(data["counts"], {"vertices": 8, "edges": 12, "faces": 5})
         self.assertEqual(data["faces"]["quads"], 5)
         self.assertEqual(data["faces"]["triangles"]["count"], 0)
+        self.assertEqual(data["islands"]["count"], 1)
 
         # Only the 4 outer corners are poles, those on the mirror plane get 4 edges once mirrored.
         poles = data["poles"]
@@ -1287,6 +1288,15 @@ class _TestServerMixin:
         self.assertEqual(data["wire_edges"]["count"], 1)
         self.assertEqual(data["loose_vertices"]["count"], 1)
         self.assertEqual(data["loose_vertices"]["items"][0]["co"], [4.0, 0.0, 0.0])
+        # The grid, the wire edge and the loose vertex, the largest first.
+        islands = data["islands"]
+        self.assertEqual(islands["count"], 3)
+        self.assertEqual(
+            [(i["vertices"], i["faces"]) for i in islands["items"]],
+            [(16, 9), (2, 0), (1, 0)],
+        )
+        self.assertEqual(islands["items"][0]["first_vertex"], 0)
+        self.assertEqual(islands["items"][2]["center"], [4.0, 0.0, 0.0])
         self.assertEqual(data["non_manifold_edges"]["count"], 0)
         # The flipped face is joined to 2 neighbors.
         self.assertEqual(data["inconsistent_normal_edges"]["count"], 2)

@@ -40,6 +40,7 @@ class Result(NamedTuple):
     wire_edges: dict[str, Any] | None = None
     loose_vertices: dict[str, Any] | None = None
     inconsistent_normal_edges: dict[str, Any] | None = None
+    islands: dict[str, Any] | None = None
     creases: dict[str, int] | None = None
     sharp_edges: int | None = None
     symmetry: list[dict[str, Any]] | None = None
@@ -148,6 +149,9 @@ class _Items:
         self._verts = {v: i for i, v in enumerate(bm.verts)}
         self._edges = {e: i for i, e in enumerate(bm.edges)}
         self._faces = {f: i for i, f in enumerate(bm.faces)}
+
+    def vert_index(self, v: _BMVert) -> int:
+        return self._verts[v]
 
     def vert(self, v: _BMVert) -> dict[str, Any]:
         return {"index": self._verts[v], "co": _round_co(v.co)}
@@ -363,6 +367,43 @@ def _subdivision_size(
     }
 
 
+def _islands(bm: _BMesh, items: _Items) -> list[dict[str, Any]]:
+    """
+    Return the connected parts of the mesh, the largest first.
+
+    Each part has its number of ``vertices`` and ``faces``, its smallest vertex index
+    (``first_vertex``) and the ``center`` of its object-space bounds.
+    """
+    seen: set[Any] = set()
+    result: list[dict[str, Any]] = []
+    for start in bm.verts:
+        if start in seen:
+            continue
+        seen.add(start)
+        stack = [start]
+        verts = []
+        while stack:
+            v = stack.pop()
+            verts.append(v)
+            for e in v.link_edges:
+                other = e.other_vert(v)
+                if other not in seen:
+                    seen.add(other)
+                    stack.append(other)
+        faces = {f for v in verts for f in v.link_faces}
+        result.append({
+            "vertices": len(verts),
+            "faces": len(faces),
+            "first_vertex": min(items.vert_index(v) for v in verts),
+            "center": _round_co([
+                (min(v.co[axis] for v in verts) + max(v.co[axis] for v in verts)) / 2.0
+                for axis in range(3)
+            ]),
+        })
+    result.sort(key=lambda island: (-island["vertices"], island["first_vertex"]))
+    return result
+
+
 def _topology(obj: _Object, bm: _BMesh, is_edit_mode: bool) -> dict[str, Any]:
     planes = _mirror_planes(obj)
     items = _Items(bm)
@@ -431,6 +472,7 @@ def _topology(obj: _Object, bm: _BMesh, is_edit_mode: bool) -> dict[str, Any]:
         "wire_edges": _listing(wire, items.edge),
         "loose_vertices": _listing(loose, items.vert),
         "inconsistent_normal_edges": _listing(inconsistent, items.edge),
+        "islands": _listing(_islands(bm, items), lambda island: island),
         "creases": {
             "edges": sum(1 for e in bm.edges if e[crease_edge] > 0.0) if crease_edge is not None else 0,
             "vertices": sum(1 for v in bm.verts if v[crease_vert] > 0.0) if crease_vert is not None else 0,
