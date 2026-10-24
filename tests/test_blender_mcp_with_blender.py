@@ -1839,6 +1839,8 @@ class _TestServerMixin:
             except ValueError as ex:
                 result["overlap_error"] = str(ex)
             result["overlap_unchanged"] = (len(bm.verts), len(bm.edges), len(bm.faces)) == counts
+            # The lookup tables are usable after the error.
+            result["overlap_lookup_ok"] = bm.verts[0].index == 0 and bm.faces[len(bm.faces) - 1] is not None
             bm.free()
 
             # Bridging an open half tube leaves the normals of its faces as they are.
@@ -1877,6 +1879,7 @@ class _TestServerMixin:
         self.assertEqual(data["overlap_sources"], [True, True])
         self.assertIn("overlap", data["overlap_error"])
         self.assertTrue(data["overlap_unchanged"])
+        self.assertTrue(data["overlap_lookup_ok"])
         self.assertTrue(data["kept_normals"])
         self.assertTrue(data["bridge_contiguous"])
         self.assertEqual(data["diagonal_loop_z"], [0.5])

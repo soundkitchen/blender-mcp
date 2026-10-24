@@ -144,6 +144,7 @@ def extrude(bm: _BMesh, faces: Iterable[_BMFace]) -> Extruded:
             if len(candidates) != 1:
                 # Undo the extrusion: delete the new geometry, the original faces are still there.
                 bmesh.ops.delete(bm, geom=new_verts, context='VERTS')
+                _update_indices(bm)
                 raise ValueError(
                     "Vertices {:s} of the faces to extrude overlap, merge them first".format(
                         str(sorted(c.index for c in candidates)))
