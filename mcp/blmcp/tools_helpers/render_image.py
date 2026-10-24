@@ -14,6 +14,7 @@ import base64
 import json
 
 from mcp.server.mcpserver import Image  # pylint: disable=import-error,no-name-in-module
+from mcp.server.mcpserver.exceptions import ToolError  # pylint: disable=import-error,no-name-in-module
 
 
 def render_response_as_image_and_info(response: dict[str, object]) -> tuple[Image, str]:
@@ -21,14 +22,15 @@ def render_response_as_image_and_info(response: dict[str, object]) -> tuple[Imag
     Convert the add-on *response* of a ``*_as_image`` render tool-code
     into a PNG image and a JSON string with the render info.
 
-    Raises ``RuntimeError`` when the add-on or the tool-code reports an error.
+    Raises ``ToolError`` when the add-on or the tool-code reports an error,
+    its message reaches the client (unlike other exceptions, reported without the message).
     """
     if response.get("status") != "ok":
-        raise RuntimeError(str(response.get("message", "Unknown error")))
+        raise ToolError(str(response.get("message", "Unknown error")))
     result = response["result"]
     assert isinstance(result, dict)
     if result.get("status") != "ok":
-        raise RuntimeError(str(result.get("message", "Unknown error")))
+        raise ToolError(str(result.get("message", "Unknown error")))
     image_base64 = result.pop("image_base64")
     del result["status"]
     info = {key: value for key, value in result.items() if value is not None}

@@ -102,6 +102,10 @@ The tools exposed by the MCP server.
 ``jump_to_view3d_object_data_by_name``
    Move the 3D viewport to the object whose data block matches *name*.
 
+``render_mesh_wireframe_as_image``
+   Draw the mesh object *name* in orthographic views with its vertex
+   indices, returned as a PNG image.
+
 ``render_thumbnail_as_image``
    Render a small, low-quality thumbnail and return it as a PNG image
    (temporarily overrides settings).

@@ -1462,6 +1462,85 @@ class _TestServerMixin:
         self.assertEqual(data["status"], "error")
         self.assertIn("'NonExistent' not found", data["message"])
 
+    def _call_tool_mesh_wireframe(self, arguments: dict[str, object]) -> dict[str, object]:
+        """
+        Call ``render_mesh_wireframe_as_image``, check the image and return the info.
+        """
+        content = self._call_tool("render_mesh_wireframe_as_image", arguments)
+        self.assertEqual(len(content), 2)
+        self.assertEqual(content[0].get("type"), "image")
+        self.assertEqual(content[1].get("type"), "text")
+        info = json.loads(str(content[1]["text"]))
+        self.assertEqual(
+            self._image_size(str(content[0]["data"])),
+            (info["image_width"], info["image_height"]),
+        )
+        return info
+
+    def test_render_mesh_wireframe_as_image(self) -> None:
+        # The default cube: FRONT (looking along +Y) sees the 4 vertices at Y=-1,
+        # RIGHT (looking along -X) the 4 at X=+1, the 2 at X=-1 & Y=+1 are hidden in both.
+        info = self._call_tool_mesh_wireframe({"name": "Cube"})
+        self.assertEqual([v["view"] for v in info["views"]], ["FRONT", "RIGHT"])
+        front, right = info["views"]
+        self.assertEqual((front["right"], front["up"]), ("+X", "+Z"))
+        self.assertEqual((right["right"], right["up"]), ("+Y", "+Z"))
+        # Panels are side by side and fill the image.
+        self.assertEqual(front["rect"][0] + front["rect"][2], right["rect"][0])
+        self.assertEqual(right["rect"][0] + right["rect"][2], info["image_width"])
+        self.assertFalse(info["is_edit_mode"])
+        self.assertEqual(info["vertices_labeled"], 6)
+        self.assertEqual(info["vertices_unlabeled"], [])
+        self.assertEqual(info["vertices_hidden"], 2)
+        self.assertEqual(info["vertices_outside_bounds"], 0)
+
+    def test_render_mesh_wireframe_as_image_bounds(self) -> None:
+        # Only the top of the cube, seen from above: the 4 top vertices.
+        info = self._call_tool_mesh_wireframe({
+            "name": "Cube",
+            "views": ["TOP"],
+            "bounds_min": [-1.5, -1.5, 0.5],
+            "bounds_max": [1.5, 1.5, 1.5],
+        })
+        (top,) = info["views"]
+        self.assertEqual((top["right"], top["up"]), ("+X", "+Y"))
+        self.assertEqual(info["bounds_min"], [-1.5, -1.5, 0.5])
+        self.assertEqual(info["bounds_max"], [1.5, 1.5, 1.5])
+        self.assertEqual(info["vertices_outside_bounds"], 4)
+        self.assertEqual(info["vertices_labeled"], 4)
+        self.assertEqual(info["vertices_hidden"], 0)
+
+    def test_render_mesh_wireframe_as_image_edit_mode(self) -> None:
+        def code() -> None:
+            import bmesh  # type: ignore[import-not-found]
+            import bpy  # type: ignore[import-not-found]
+            obj = bpy.data.objects["Cube"]
+            bpy.context.view_layer.objects.active = obj
+            bpy.ops.object.mode_set(mode='EDIT')
+            # Add a vertex in front of the cube, without syncing to the mesh.
+            bm = bmesh.from_edit_mesh(obj.data)
+            bm.verts.new((0.0, -2.0, 0.0))
+            result = {'vertices': len(obj.data.vertices)}  # noqa: F841
+        data = self._test_tool("execute_blender_code", {
+            "code": _python_fn_body_as_string(code),
+        })
+        self.assertEqual(data["vertices"], 8)
+
+        info = self._call_tool_mesh_wireframe({"name": "Cube", "views": ["FRONT"]})
+        self.assertTrue(info["is_edit_mode"])
+        # The 4 front vertices and the new one.
+        self.assertEqual(info["vertices_labeled"], 5)
+        self.assertEqual(info["vertices_hidden"], 4)
+
+    def test_render_mesh_wireframe_as_image_error(self) -> None:
+        for arguments, message in (
+                ({"name": "Light"}, "not a mesh"),
+                ({"name": "NonExistent"}, "'NonExistent' not found"),
+                ({"name": "Cube", "bounds_min": [0.0, 0.0, 0.0]}, "Pass both bounds_min and bounds_max"),
+        ):
+            content = self._call_tool_expect_error("render_mesh_wireframe_as_image", arguments)
+            self.assertIn(message, str(content[0].get("text", "")))
+
     def test_get_scene_render_summary(self) -> None:
         data = self._test_tool("get_scene_render_summary")
         self.assertEqual(data["status"], "ok")
@@ -1902,6 +1981,8 @@ class _TestServerMixin:
         })
         content = self._call_tool_expect_error("render_viewport_as_image")
         self.assertNotIn("image", [item.get("type") for item in content])
+        # The reason reaches the client.
+        self.assertIn("no camera", str(content[0].get("text", "")))
 
     def test_render_viewport_as_image_outputs(self) -> None:
         """
