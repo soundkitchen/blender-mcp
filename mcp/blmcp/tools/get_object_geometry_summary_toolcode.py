@@ -88,20 +88,13 @@ def _mesh_counts(mesh: _Mesh) -> dict[str, int]:
     }
 
 
-# Axis-aligned bounds as `(min, max)`, each a list of 3 floats.
+# @include_begin: _template_coords_min_max.py
 _MinMax = tuple[list[float], list[float]]
 
 
 def _coords_min_max(coords: Any) -> _MinMax | None:
-    """
-    Return the bounds of the flat ``x, y, z, ...`` sequence *coords*.
-    """
-    if not coords:
-        return None
-    return (
-        [min(coords[axis::3]) for axis in range(3)],
-        [max(coords[axis::3]) for axis in range(3)],
-    )
+    return ([], []) if coords else None
+# @include_end
 
 
 def _box_min_max(bound_box: Any, matrix: Any) -> _MinMax:
