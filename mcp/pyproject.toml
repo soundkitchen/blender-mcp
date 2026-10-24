@@ -27,6 +27,8 @@ where = ["."]
     "data/api/**/*.rst",
     # Blender user manual.
     "data/manual/**/*.rst",
+    # Modeling guides (`get_modeling_guide`).
+    "data/guides/*.md",
 ]
 
 [tool.mypy]

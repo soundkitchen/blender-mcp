@@ -57,6 +57,10 @@ The tools exposed by the MCP server.
    Return topology checks of the mesh object *name*, for use as a
    subdivision surface cage.
 
+``get_modeling_guide``
+   Return a step-by-step modeling guide for *topic*, with pitfalls, checks
+   and tested example code.
+
 ``get_node_tree_summary``
    Return the nodes of a node tree with their settings, input values and
    links.

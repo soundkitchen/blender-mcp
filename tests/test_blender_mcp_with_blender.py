@@ -1633,6 +1633,39 @@ class _TestServerMixin:
             content = self._call_tool_expect_error("render_mesh_wireframe_as_image", arguments)
             self.assertIn(message, str(content[0].get("text", "")))
 
+    def test_get_modeling_guide_character(self) -> None:
+        """
+        The guide's example code builds a clean cage: keep it working.
+        """
+        data = self._test_tool("get_modeling_guide", {"topic": "character"})
+        self.assertEqual(data["topic"], "character")
+        guide = str(data["guide"])
+        self.assertIn("get_mesh_topology_summary", guide)
+        code = guide.split("```python\n", 1)[1].split("```", 1)[0]
+
+        data = self._test_tool("execute_blender_code", {"code": code})
+        self.assertEqual(data["object"], "Human")
+
+        data = self._test_tool("get_mesh_topology_summary", {"name": "Human"})
+        self.assertEqual(data["status"], "ok")
+        self.assertEqual(data["islands"]["count"], 1)
+        self.assertEqual(data["faces"]["triangles"]["count"], 0)
+        self.assertEqual(data["faces"]["ngons"]["count"], 0)
+        for key in (
+                "boundary_edges", "non_manifold_edges", "wire_edges",
+                "loose_vertices", "inconsistent_normal_edges",
+        ):
+            self.assertEqual(data[key]["count"], 0, key)
+        (symmetry,) = data["symmetry"]
+        self.assertTrue(symmetry["is_joined"])
+        self.assertEqual(symmetry["off_center_vertices"]["count"], 0)
+        self.assertEqual(symmetry["crossing_faces"]["count"], 0)
+        self.assertEqual(data["warnings"], [])
+
+    def test_get_modeling_guide_error(self) -> None:
+        content = self._call_tool_expect_error("get_modeling_guide", {"topic": "NONEXISTENT"})
+        self.assertIn("topic", str(content[0].get("text", "")))
+
     def test_get_scene_render_summary(self) -> None:
         data = self._test_tool("get_scene_render_summary")
         self.assertEqual(data["status"], "ok")

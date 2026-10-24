@@ -137,6 +137,8 @@ requests to Blender.
      connection time.
    - ``api/`` contains Blender Python API reference in RST format.
    - ``manual/`` contains Blender user manual excerpts in RST format.
+   - ``guides/`` contains modeling guides in Markdown, returned by
+     ``get_modeling_guide``. Their example code is run by the tests.
 
 ``mcp/blmcp/tools/``
    Each tool is a single module, auto-discovered at startup.
