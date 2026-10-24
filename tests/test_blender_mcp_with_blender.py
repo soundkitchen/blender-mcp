@@ -1181,9 +1181,10 @@ class _TestServerMixin:
                 plane_co=(0.0, 0.0, 0.0), plane_no=(1.0, 0.0, 0.0), clear_inner=True,
             )
             # The bisect fills nothing, so the cut is an open boundary on X=0.
-            # Move one vertex on the plane slightly off it.
+            # Move one vertex on the plane slightly off it: further than half the
+            # merge distance (0.001), so the Mirror modifier doesn't weld it.
             moved = next(v for v in bm.verts if abs(v.co.x) < 1e-6 and v.co.y > 0.0 and v.co.z > 0.0)
-            moved.co.x = 0.005
+            moved.co.x = 0.0007
             bm.to_mesh(mesh)
             bm.free()
             obj = bpy.data.objects.new("Half", mesh)
@@ -1212,11 +1213,13 @@ class _TestServerMixin:
         (symmetry,) = data["symmetry"]
         self.assertEqual(symmetry["axis"], "X")
         self.assertEqual(symmetry["modifier"], "Mirror")
+        self.assertAlmostEqual(symmetry["tolerance"], 0.0005, places=6)
+        self.assertTrue(symmetry["is_joined"])
         self.assertTrue(symmetry["use_clip"])
         self.assertEqual(symmetry["vertices_negative_side"], 0)
         off_center = symmetry["off_center_vertices"]
         self.assertEqual(off_center["count"], 1)
-        self.assertAlmostEqual(off_center["items"][0]["co"][0], 0.005, places=5)
+        self.assertAlmostEqual(off_center["items"][0]["co"][0], 0.0007, places=6)
         self.assertEqual(symmetry["crossing_faces"]["count"], 0)
         # Edges on the mirror plane are not holes, the 2 using the moved vertex are.
         self.assertEqual(data["boundary_edges"]["count"], 2)
@@ -1294,6 +1297,119 @@ class _TestServerMixin:
         self.assertIn("comes before Mirror", warnings[0])
         self.assertIn("clipping disabled", warnings[1])
 
+    def test_get_mesh_topology_summary_mirror_planes(self) -> None:
+        def code() -> None:
+            import bmesh  # type: ignore[import-not-found]
+            import bpy  # type: ignore[import-not-found]
+
+            def add(name: str, build: object) -> object:
+                mesh = bpy.data.meshes.new(name)
+                bm = bmesh.new()
+                build(bm)  # type: ignore[operator]
+                bm.to_mesh(mesh)
+                bm.free()
+                obj = bpy.data.objects.new(name, mesh)
+                bpy.context.scene.collection.objects.link(obj)
+                return obj
+
+            # A quarter of a quad split by the diagonal from the corner at the origin.
+            def quarter(bm: object) -> None:
+                a = bm.verts.new((0.0, 0.0, 0.0))  # type: ignore[attr-defined]
+                b = bm.verts.new((1.0, 0.0, 0.0))  # type: ignore[attr-defined]
+                c = bm.verts.new((1.0, 1.0, 0.0))  # type: ignore[attr-defined]
+                d = bm.verts.new((0.0, 1.0, 0.0))  # type: ignore[attr-defined]
+                bm.faces.new((a, b, c))  # type: ignore[attr-defined]
+                bm.faces.new((a, c, d))  # type: ignore[attr-defined]
+
+            obj = add("Quarter", quarter)
+            mirror = obj.modifiers.new("Mirror", 'MIRROR')  # type: ignore[attr-defined]
+            mirror.use_axis = (True, True, False)
+            obj.modifiers.new("Subdivision", 'SUBSURF')  # type: ignore[attr-defined]
+
+            # The positive X half of a cube, open on X=0, mirrored without merging.
+            def half(bm: object) -> None:
+                bmesh.ops.create_cube(bm, size=2.0)
+                bmesh.ops.bisect_plane(
+                    bm, geom=bm.verts[:] + bm.edges[:] + bm.faces[:],  # type: ignore[attr-defined]
+                    plane_co=(0.0, 0.0, 0.0), plane_no=(1.0, 0.0, 0.0), clear_inner=True,
+                )
+
+            obj = add("Unmerged", half)
+            mirror = obj.modifiers.new("Mirror", 'MIRROR')  # type: ignore[attr-defined]
+            mirror.use_mirror_merge = False
+            mirror.use_clip = True
+            obj.modifiers.new("Subdivision", 'SUBSURF')  # type: ignore[attr-defined]
+            result = {'ok': True}  # noqa: F841
+        self._test_tool("execute_blender_code", {
+            "code": _python_fn_body_as_string(code),
+        })
+
+        # Mirrored on X and Y, the corner gets 2 copies of each edge on a plane
+        # and 4 of the diagonal: 2 + 2 + 4 edges.
+        data = self._test_tool("get_mesh_topology_summary", {"name": "Quarter"})
+        self.assertEqual(data["status"], "ok")
+        self.assertEqual([s["axis"] for s in data["symmetry"]], ["X", "Y"])
+        (pole,) = data["poles"]["valence_5_plus"]["items"]
+        self.assertEqual(pole["co"], [0.0, 0.0, 0.0])
+        self.assertEqual(pole["valence"], 8)
+        # Only the 2 outer edges (X=1 and Y=1) are open.
+        self.assertEqual(data["boundary_edges"]["count"], 2)
+
+        # Without merging, the seam on the mirror plane stays open.
+        data = self._test_tool("get_mesh_topology_summary", {"name": "Unmerged"})
+        self.assertEqual(data["status"], "ok")
+        self.assertFalse(data["symmetry"][0]["is_joined"])
+        self.assertEqual(data["boundary_edges"]["count"], 4)
+        self.assertEqual(data["poles"]["valence_3"]["count"], 4)
+        self.assertEqual(data["warnings"], ["Mirror 'Mirror' has merge disabled: the mirror seam stays open"])
+        self.assertIsNone(data["subdivision_size"])
+
+    def test_get_mesh_topology_summary_enabled_modifiers(self) -> None:
+        def code() -> None:
+            import bpy  # type: ignore[import-not-found]
+            obj = bpy.data.objects["Cube"]
+            # A disabled Mirror without clipping is ignored.
+            old = obj.modifiers.new("Old Mirror", 'MIRROR')
+            old.use_clip = False
+            old.show_viewport = False
+            obj.modifiers.new("Subdivision", 'SUBSURF')
+            # The enabled Mirror after the subdivision is not joined.
+            mirror = obj.modifiers.new("Mirror", 'MIRROR')
+            mirror.use_clip = True
+            obj.modifiers.new("Array", 'ARRAY')
+            result = {'ok': True}  # noqa: F841
+        self._test_tool("execute_blender_code", {
+            "code": _python_fn_body_as_string(code),
+        })
+        data = self._test_tool("get_mesh_topology_summary", {"name": "Cube"})
+        self.assertEqual(data["status"], "ok")
+        self.assertEqual([s["modifier"] for s in data["symmetry"]], ["Mirror"])
+        self.assertFalse(data["symmetry"][0]["is_joined"])
+        self.assertEqual(data["warnings"], [
+            "Subdivision 'Subdivision' comes before Mirror 'Mirror': the mirror seam is not smoothed, "
+            "move the Mirror modifier above it",
+        ])
+        # The Array modifier changes the size too, it is not compared.
+        self.assertIsNone(data["subdivision_size"])
+
+    def test_get_mesh_topology_summary_non_finite(self) -> None:
+        def code() -> None:
+            import bmesh  # type: ignore[import-not-found]
+            import bpy  # type: ignore[import-not-found]
+            obj = bpy.data.objects["Cube"]
+            bm = bmesh.new()
+            bm.from_mesh(obj.data)
+            bm.verts.new((float("inf"), 0.0, 0.0))
+            bm.to_mesh(obj.data)
+            bm.free()
+            result = {'ok': True}  # noqa: F841
+        self._test_tool("execute_blender_code", {
+            "code": _python_fn_body_as_string(code),
+        })
+        data = self._test_tool("get_mesh_topology_summary", {"name": "Cube"})
+        self.assertEqual(data["status"], "ok")
+        self.assertEqual(data["loose_vertices"]["items"][0]["co"], ["inf", 0.0, 0.0])
+
     def test_get_mesh_topology_summary_edit_mode(self) -> None:
         def code() -> None:
             import bmesh  # type: ignore[import-not-found]
@@ -1305,6 +1421,11 @@ class _TestServerMixin:
             bm = bmesh.from_edit_mesh(obj.data)
             bm.faces.ensure_lookup_table()
             bmesh.ops.poke(bm, faces=[bm.faces[0]])
+            # Mark a vertex with an index of its own, without flagging the indices as dirty,
+            # so only an explicit index update changes it.
+            bm.verts.index_update()
+            bm.verts.ensure_lookup_table()
+            bm.verts[-1].index = 4321
             result = {'faces': len(obj.data.polygons)}  # noqa: F841
         data = self._test_tool("execute_blender_code", {
             "code": _python_fn_body_as_string(code),
@@ -1320,6 +1441,17 @@ class _TestServerMixin:
         self.assertEqual(data["poles"]["valence_3"]["count"], 4)
         self.assertIsNone(data["subdivision_size"])
         self.assertEqual(data["symmetry"], [])
+
+        # The tool reads a copy, the indices of the edit-mesh are not updated.
+        data_index = self._test_tool("execute_blender_code", {
+            "code": (
+                "import bmesh, bpy\n"
+                "bm = bmesh.from_edit_mesh(bpy.data.objects['Cube'].data)\n"
+                "bm.verts.ensure_lookup_table()\n"
+                "result = {'index': bm.verts[-1].index}\n"
+            ),
+        })
+        self.assertEqual(data_index["index"], 4321)
 
     def test_get_mesh_topology_summary_error(self) -> None:
         data = self._test_tool("get_mesh_topology_summary", {"name": "Light"})

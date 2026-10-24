@@ -12,6 +12,7 @@ __all__ = (
     "main",
 )
 
+import math
 from typing import Any, NamedTuple
 
 # Placeholder types for Blender Python objects (no stubs available).
@@ -62,16 +63,27 @@ def _rna_props_to_json(
 # @include_end
 
 
+# @include_begin: _template_coords_min_max.py
+_MinMax = tuple[list[float], list[float]]
+
+
+def _coords_min_max(coords: Any) -> _MinMax | None:
+    return ([], []) if coords else None
+# @include_end
+
+
 # The maximum number of elements listed per check, the `count` includes the rest.
 _ITEMS_MAX = 50
 
-# Merge distance used for the symmetry checks when the Mirror modifier doesn't merge.
-_SYMMETRY_TOLERANCE_DEFAULT = 0.001
+# Merge distance assumed for the symmetry checks when the Mirror modifier doesn't merge.
+_MERGE_DISTANCE_DEFAULT = 0.001
 # Vertices closer to the mirror plane than this (relative to the mesh size
 # along the axis) are reported as off-center, as they were likely meant to be on it.
 _SYMMETRY_NEAR_FACTOR = 0.02
 
 _AXES = ("X", "Y", "Z")
+
+_SUBDIVISION_TYPES = {'SUBSURF', 'MULTIRES'}
 
 # Reported at the top level of each modifier (not under `settings`).
 _MODIFIER_COMMON = (
@@ -90,23 +102,61 @@ _MODIFIER_SKIP = _MODIFIER_COMMON + (
 )
 _MODIFIER_SKIP_PREFIXES = ("open_",)
 # Modifiers that matter for a subdivision cage, others are listed by name and type only.
-_MODIFIER_TYPES_WITH_SETTINGS = {'MIRROR', 'SUBSURF', 'MULTIRES'}
+_MODIFIER_TYPES_WITH_SETTINGS = {'MIRROR'} | _SUBDIVISION_TYPES
 
 
-def _round_co(co: Any) -> list[float]:
-    return [round(v, 6) for v in co]
+class _Plane(NamedTuple):
+    """
+    A mirror plane through the object's origin, from a Mirror modifier axis.
+    """
+
+    axis: int
+    modifier: _Modifier
+    # Vertices this close to the plane are on it: the merge distance is
+    # between a vertex and its mirrored copy, twice the distance to the plane.
+    tolerance: float
+    # True when the cage is welded to its mirrored copy along the plane
+    # before it is subdivided (the Mirror merges and comes first).
+    is_joined: bool
 
 
-def _vert_item(v: _BMVert) -> dict[str, Any]:
-    return {"index": v.index, "co": _round_co(v.co)}
+def _round(value: float, digits: int = 6) -> float | str:
+    # Non-finite floats are not valid JSON, report them as strings (e.g. "inf").
+    return round(value, digits) if math.isfinite(value) else str(value)
 
 
-def _edge_item(e: _BMEdge) -> dict[str, Any]:
-    return {"index": e.index, "vertices": [v.index for v in e.verts]}
+def _round_co(co: Any) -> list[float | str]:
+    return [_round(v) for v in co]
 
 
-def _face_item(f: _BMFace) -> dict[str, Any]:
-    return {"index": f.index, "sides": len(f.verts), "center": _round_co(f.calc_center_median())}
+class _Items:
+    """
+    Convert elements to JSON items, numbered by their order in the BMesh.
+
+    The order matches the mesh (once synced), so these are the mesh indices.
+    ``BMElem.index`` is not used: updating it would renumber the edit-mesh owned by Blender,
+    which scripts may rely on.
+    """
+
+    __slots__ = (
+        "_verts",
+        "_edges",
+        "_faces",
+    )
+
+    def __init__(self, bm: _BMesh) -> None:
+        self._verts = {v: i for i, v in enumerate(bm.verts)}
+        self._edges = {e: i for i, e in enumerate(bm.edges)}
+        self._faces = {f: i for i, f in enumerate(bm.faces)}
+
+    def vert(self, v: _BMVert) -> dict[str, Any]:
+        return {"index": self._verts[v], "co": _round_co(v.co)}
+
+    def edge(self, e: _BMEdge) -> dict[str, Any]:
+        return {"index": self._edges[e], "vertices": [self._verts[v] for v in e.verts]}
+
+    def face(self, f: _BMFace) -> dict[str, Any]:
+        return {"index": self._faces[f], "sides": len(f.verts), "center": _round_co(f.calc_center_median())}
 
 
 def _listing(items: list[Any], item_fn: Any) -> dict[str, Any]:
@@ -119,39 +169,58 @@ def _listing(items: list[Any], item_fn: Any) -> dict[str, Any]:
     }
 
 
-def _mirror_planes(obj: _Object) -> list[tuple[int, _Modifier]]:
-    """
-    Return ``(axis, modifier)`` for each enabled mirror axis.
+def _enabled_modifiers(obj: _Object) -> list[_Modifier]:
+    return [mod for mod in obj.modifiers if mod.show_viewport]
 
-    Only Mirror modifiers without a mirror object are used,
-    the plane is then at the object's origin.
+
+def _first_subdivision_index(modifiers: list[_Modifier]) -> int:
     """
+    Return the index of the first subdivision modifier in *modifiers*, ``len(modifiers)`` when there is none.
+    """
+    return next((i for i, mod in enumerate(modifiers) if mod.type in _SUBDIVISION_TYPES), len(modifiers))
+
+
+def _mirror_planes(obj: _Object) -> list[_Plane]:
+    """
+    Return a plane for each axis of the enabled Mirror modifiers.
+
+    Mirror modifiers with a mirror object are skipped, their plane is not at the object's origin.
+    """
+    modifiers = _enabled_modifiers(obj)
+    subdivision_index = _first_subdivision_index(modifiers)
     result = []
-    for mod in obj.modifiers:
-        if mod.type != 'MIRROR' or not mod.show_viewport or mod.mirror_object is not None:
+    for index, mod in enumerate(modifiers):
+        if mod.type != 'MIRROR' or mod.mirror_object is not None:
             continue
+        merge_distance = mod.merge_threshold if mod.use_mirror_merge else _MERGE_DISTANCE_DEFAULT
+        is_joined = mod.use_mirror_merge and index < subdivision_index
         for axis in range(3):
             if mod.use_axis[axis]:
-                result.append((axis, mod))
+                result.append(_Plane(axis, mod, merge_distance / 2.0, is_joined))
     return result
 
 
-def _symmetry_tolerance(mod: _Modifier) -> float:
-    return mod.merge_threshold if mod.use_mirror_merge else _SYMMETRY_TOLERANCE_DEFAULT
+def _is_on_plane(v: _BMVert, plane: _Plane) -> bool:
+    return bool(abs(v.co[plane.axis]) <= plane.tolerance)
 
 
-def _is_edge_on_planes(e: _BMEdge, planes: list[tuple[int, float]]) -> bool:
-    """
-    Return whether *e* lies on a mirror plane, joining it to its mirrored copy.
-    """
-    return any(all(abs(v.co[axis]) <= tolerance for v in e.verts) for axis, tolerance in planes)
+def _is_edge_on_plane(e: _BMEdge, plane: _Plane) -> bool:
+    return all(_is_on_plane(v, plane) for v in e.verts)
 
 
-def _symmetry_info(bm: _BMesh, axis: int, mod: _Modifier) -> dict[str, Any]:
+def _is_edge_joined(e: _BMEdge, planes: list[_Plane]) -> bool:
     """
-    Check the cage against the mirror plane on *axis*.
+    Return whether *e* lies on a joined mirror plane, welding it to its mirrored copy.
     """
-    tolerance = _symmetry_tolerance(mod)
+    return any(plane.is_joined and _is_edge_on_plane(e, plane) for plane in planes)
+
+
+def _symmetry_info(bm: _BMesh, plane: _Plane, items: _Items) -> dict[str, Any]:
+    """
+    Check the cage against the mirror *plane*.
+    """
+    axis = plane.axis
+    tolerance = plane.tolerance
     coords = [v.co[axis] for v in bm.verts]
     size = (max(coords) - min(coords)) if coords else 0.0
     near = max(tolerance * 10.0, size * _SYMMETRY_NEAR_FACTOR)
@@ -166,31 +235,37 @@ def _symmetry_info(bm: _BMesh, axis: int, mod: _Modifier) -> dict[str, Any]:
     ]
     return {
         "axis": _AXES[axis],
-        "modifier": mod.name,
-        "tolerance": round(tolerance, 6),
-        "use_clip": mod.use_clip,
+        "modifier": plane.modifier.name,
+        "tolerance": _round(tolerance, 7),
+        "is_joined": plane.is_joined,
+        "use_clip": plane.modifier.use_clip,
         "vertices_positive_side": positive,
         "vertices_negative_side": negative,
-        "off_center_vertices": _listing(off_center, _vert_item),
-        "crossing_faces": _listing(crossing, _face_item),
+        "off_center_vertices": _listing(off_center, items.vert),
+        "crossing_faces": _listing(crossing, items.face),
     }
 
 
-def _pole_valence(v: _BMVert, planes: list[tuple[int, float]]) -> int | None:
+def _pole_valence(v: _BMVert, planes: list[_Plane]) -> int | None:
     """
     Return the valence of *v* as seen on the subdivided surface, ``None`` for vertices on an open boundary.
 
-    Boundary vertices on a mirror plane become interior once mirrored:
-    the edges along the plane are kept and the others are doubled.
+    Boundary vertices on joined mirror planes become interior once mirrored.
+    Mirroring across the planes the vertex is on makes ``2 ** n`` copies of each edge,
+    an edge lying on one of those planes is shared by the copies on either side of it,
+    so each edge contributes ``2 ** (number of those planes it does not lie on)``.
     """
-    valence = len(v.link_edges)
     if not v.is_boundary:
-        return valence
-    boundary = [e for e in v.link_edges if e.is_boundary]
-    if not all(_is_edge_on_planes(e, planes) for e in boundary):
-        # An open boundary (hole), it stays open once mirrored.
-        return None
-    return len(boundary) + 2 * (valence - len(boundary))
+        return len(v.link_edges)
+    vert_planes = [plane for plane in planes if plane.is_joined and _is_on_plane(v, plane)]
+    for e in v.link_edges:
+        if e.is_boundary and not any(_is_edge_on_plane(e, plane) for plane in vert_planes):
+            # An open boundary (hole), it stays open once mirrored.
+            return None
+    return sum(
+        1 << sum(1 for plane in vert_planes if not _is_edge_on_plane(e, plane))
+        for e in v.link_edges
+    )
 
 
 def _modifier_info(index: int, mod: _Modifier) -> dict[str, Any]:
@@ -202,50 +277,69 @@ def _modifier_info(index: int, mod: _Modifier) -> dict[str, Any]:
 
 
 def _modifier_warnings(obj: _Object) -> list[str]:
+    """
+    Return problems in the stack of enabled modifiers.
+    """
+    modifiers = _enabled_modifiers(obj)
+    subdivision_index = _first_subdivision_index(modifiers)
     warnings = []
-    mirror = None
-    subsurf = None
-    for mod in obj.modifiers:
-        if mod.type == 'MIRROR' and mirror is None:
-            mirror = mod
-        elif mod.type in {'SUBSURF', 'MULTIRES'} and subsurf is None:
-            subsurf = mod
-    if mirror is not None and subsurf is not None:
-        if list(obj.modifiers).index(subsurf) < list(obj.modifiers).index(mirror):
+    for index, mod in enumerate(modifiers):
+        if mod.type != 'MIRROR':
+            continue
+        if index > subdivision_index:
             warnings.append(
                 "Subdivision {!r} comes before Mirror {!r}: the mirror seam is not smoothed, "
-                "move the Mirror modifier above it".format(subsurf.name, mirror.name)
+                "move the Mirror modifier above it".format(modifiers[subdivision_index].name, mod.name)
             )
-    if mirror is not None and not mirror.use_clip:
-        warnings.append(
-            "Mirror {!r} has clipping disabled: vertices on the mirror plane may move off it "
-            "while editing".format(mirror.name)
-        )
+        if not mod.use_mirror_merge:
+            warnings.append(
+                "Mirror {!r} has merge disabled: the mirror seam stays open".format(mod.name)
+            )
+        if not mod.use_clip:
+            warnings.append(
+                "Mirror {!r} has clipping disabled: vertices on the mirror plane may move off it "
+                "while editing".format(mod.name)
+            )
     return warnings
 
 
-def _local_size(coords: list[Any]) -> list[float]:
-    return [max(c[axis] for c in coords) - min(c[axis] for c in coords) for axis in range(3)]
-
-
-def _subdivision_size(obj: _Object, bm: _BMesh, planes: list[tuple[int, float]]) -> dict[str, Any] | None:
+def _subdivision_size(
+        obj: _Object,
+        bm: _BMesh,
+        planes: list[_Plane],
+        is_edit_mode: bool,
+) -> dict[str, Any] | None:
     """
     Compare the object-space size of the cage (mirrored) with the result after modifiers.
 
     Subdivision shrinks the shape towards the inside of the cage.
+    Only compared when the size change comes from subdivision alone: the enabled modifiers are
+    joined Mirror modifiers followed by subdivision, and not in Edit Mode (the evaluated mesh
+    may not include unsynced edits or modifiers hidden in Edit Mode).
     """
+    from array import array
+
     import bpy  # pylint: disable=import-error,no-name-in-module
 
-    if not any(mod.type in {'SUBSURF', 'MULTIRES'} and mod.show_viewport for mod in obj.modifiers):
+    if is_edit_mode or not bm.verts:
         return None
-    if not bm.verts:
+    modifiers = _enabled_modifiers(obj)
+    subdivision_index = _first_subdivision_index(modifiers)
+    if subdivision_index == len(modifiers):
         return None
+    joined = {plane.modifier.name for plane in planes if plane.is_joined}
+    for index, mod in enumerate(modifiers):
+        is_mirror = index < subdivision_index and mod.name in joined
+        if not (is_mirror or (index >= subdivision_index and mod.type in _SUBDIVISION_TYPES)):
+            return None
 
-    cage = [list(v.co) for v in bm.verts]
-    # Include the mirrored copies, so the size matches the evaluated result.
-    for axis, _tolerance in planes:
-        cage.extend([[-c if i == axis else c for i, c in enumerate(co)] for co in cage])
-    cage_size = _local_size(cage)
+    # Defined by `_template_coords_min_max.py`.
+    cage_min_max = _coords_min_max([c for v in bm.verts for c in v.co])
+    assert cage_min_max is not None
+    cage_size = [hi - lo for lo, hi in zip(*cage_min_max)]
+    # The mirrored cage is symmetric around each plane.
+    for axis in {plane.axis for plane in planes if plane.is_joined}:
+        cage_size[axis] = 2.0 * max(abs(cage_min_max[0][axis]), abs(cage_min_max[1][axis]))
 
     depsgraph = bpy.context.evaluated_depsgraph_get()
     obj_eval = obj.evaluated_get(depsgraph)
@@ -253,21 +347,25 @@ def _subdivision_size(obj: _Object, bm: _BMesh, planes: list[tuple[int, float]])
         return None
     mesh = obj_eval.to_mesh()
     try:
-        if not mesh.vertices:
-            return None
-        evaluated_size = _local_size([v.co for v in mesh.vertices])
+        coords = array("f", bytes(4 * 3 * len(mesh.vertices)))
+        mesh.vertices.foreach_get("co", coords)
+        evaluated_min_max = _coords_min_max(coords)
     finally:
         obj_eval.to_mesh_clear()
+    if evaluated_min_max is None:
+        return None
+    evaluated_size = [hi - lo for lo, hi in zip(*evaluated_min_max)]
 
     return {
-        "cage": [round(v, 6) for v in cage_size],
-        "evaluated": [round(v, 6) for v in evaluated_size],
-        "ratio": [round(e / c, 4) if c > 0.0 else None for c, e in zip(cage_size, evaluated_size)],
+        "cage": [_round(v) for v in cage_size],
+        "evaluated": [_round(v) for v in evaluated_size],
+        "ratio": [_round(e / c, 4) if c > 0.0 else None for c, e in zip(cage_size, evaluated_size)],
     }
 
 
-def _topology(obj: _Object, bm: _BMesh) -> dict[str, Any]:
-    planes = [(axis, _symmetry_tolerance(mod)) for axis, mod in _mirror_planes(obj)]
+def _topology(obj: _Object, bm: _BMesh, is_edit_mode: bool) -> dict[str, Any]:
+    planes = _mirror_planes(obj)
+    items = _Items(bm)
 
     quads = 0
     triangles = []
@@ -295,7 +393,7 @@ def _topology(obj: _Object, bm: _BMesh) -> dict[str, Any]:
         if valence == 3:
             poles_3.append(v)
         elif valence is not None and valence >= 5:
-            poles_5.append(v)
+            poles_5.append((v, valence))
 
     non_manifold = []
     boundary = []
@@ -306,8 +404,8 @@ def _topology(obj: _Object, bm: _BMesh) -> dict[str, Any]:
         if faces == 0:
             wire.append(e)
         elif faces == 1:
-            # Edges along a mirror plane are joined to their mirrored copy.
-            if not _is_edge_on_planes(e, planes):
+            # Edges along a joined mirror plane are welded to their mirrored copy.
+            if not _is_edge_joined(e, planes):
                 boundary.append(e)
         elif faces > 2:
             non_manifold.append(e)
@@ -321,31 +419,25 @@ def _topology(obj: _Object, bm: _BMesh) -> dict[str, Any]:
         "counts": {"vertices": len(bm.verts), "edges": len(bm.edges), "faces": len(bm.faces)},
         "faces": {
             "quads": quads,
-            "triangles": _listing(triangles, _face_item),
-            "ngons": _listing(ngons, _face_item),
+            "triangles": _listing(triangles, items.face),
+            "ngons": _listing(ngons, items.face),
         },
         "poles": {
-            "valence_3": _listing(poles_3, _vert_item),
-            "valence_5_plus": {
-                "count": len(poles_5),
-                "items": [
-                    {**_vert_item(v), "valence": _pole_valence(v, planes)}
-                    for v in poles_5[:_ITEMS_MAX]
-                ],
-            },
+            "valence_3": _listing(poles_3, items.vert),
+            "valence_5_plus": _listing(poles_5, lambda item: {**items.vert(item[0]), "valence": item[1]}),
         },
-        "non_manifold_edges": _listing(non_manifold, _edge_item),
-        "boundary_edges": _listing(boundary, _edge_item),
-        "wire_edges": _listing(wire, _edge_item),
-        "loose_vertices": _listing(loose, _vert_item),
-        "inconsistent_normal_edges": _listing(inconsistent, _edge_item),
+        "non_manifold_edges": _listing(non_manifold, items.edge),
+        "boundary_edges": _listing(boundary, items.edge),
+        "wire_edges": _listing(wire, items.edge),
+        "loose_vertices": _listing(loose, items.vert),
+        "inconsistent_normal_edges": _listing(inconsistent, items.edge),
         "creases": {
             "edges": sum(1 for e in bm.edges if e[crease_edge] > 0.0) if crease_edge is not None else 0,
             "vertices": sum(1 for v in bm.verts if v[crease_vert] > 0.0) if crease_vert is not None else 0,
         },
         "sharp_edges": sum(1 for e in bm.edges if not e.smooth),
-        "symmetry": [_symmetry_info(bm, axis, mod) for axis, mod in _mirror_planes(obj)],
-        "subdivision_size": _subdivision_size(obj, bm, planes),
+        "symmetry": [_symmetry_info(bm, plane, items) for plane in planes],
+        "subdivision_size": _subdivision_size(obj, bm, planes, is_edit_mode),
     }
 
 
@@ -363,21 +455,17 @@ def main(params: Params) -> Result:
         )
 
     mesh = obj.data
-    # In Edit Mode, read the edit-mesh so unsynced edits are included.
     is_edit_mode = mesh.is_editmode
     if is_edit_mode:
-        bm = bmesh.from_edit_mesh(mesh)
+        # Read the edit-mesh so unsynced edits are included, it's only read, never modified.
+        # NOTE: `BMesh.copy` is avoided as it renumbers the elements of the source.
+        info = _topology(obj, bmesh.from_edit_mesh(mesh), is_edit_mode)
     else:
         bm = bmesh.new()
-        bm.from_mesh(mesh)
-    try:
-        bm.verts.index_update()
-        bm.edges.index_update()
-        bm.faces.index_update()
-        info = _topology(obj, bm)
-    finally:
-        # The edit-mesh is owned by Blender.
-        if not is_edit_mode:
+        try:
+            bm.from_mesh(mesh)
+            info = _topology(obj, bm, is_edit_mode)
+        finally:
             bm.free()
 
     return Result(

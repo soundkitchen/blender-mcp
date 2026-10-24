@@ -46,27 +46,33 @@ def register(mcp: MCPServer) -> None:
         ``faces`` counts ``quads`` and lists ``triangles`` and ``ngons``.
         ``poles`` lists vertices with 3 (``valence_3``) or 5 or more
         (``valence_5_plus``) edges on the subdivided surface (boundary
-        vertices are skipped, except on a mirror plane where their mirrored
-        valence is used).
-        ``boundary_edges`` are open edges (holes), edges on a mirror plane
-        are not included. ``non_manifold_edges`` have more than two faces,
-        ``wire_edges`` none, ``loose_vertices`` have no edges.
+        vertices are skipped, except on joined mirror planes where their
+        mirrored valence is used).
+        ``boundary_edges`` are open edges (holes), edges on a joined mirror
+        plane are not included. ``non_manifold_edges`` have more than two
+        faces, ``wire_edges`` none, ``loose_vertices`` have no edges.
         ``inconsistent_normal_edges`` join faces whose normals are flipped
         relative to each other.
         ``creases`` counts edges and vertices with a crease, ``sharp_edges``
         the edges marked sharp.
 
-        ``symmetry`` checks each axis of the Mirror modifiers (without a
-        mirror object): ``off_center_vertices`` are close to the mirror plane
-        but further than ``tolerance`` (the merge distance) from it,
-        ``crossing_faces`` have vertices on both sides of the plane, and
-        ``vertices_positive_side`` & ``vertices_negative_side`` count the
-        vertices on each side (all should be on one side).
+        ``symmetry`` checks each axis of the enabled Mirror modifiers (without
+        a mirror object). Vertices within ``tolerance`` (half the merge
+        distance) of the plane are on it, and ``is_joined`` is true when the
+        Mirror merges and comes before subdivision, welding the cage to its
+        mirrored copy along the plane. ``off_center_vertices`` are close to
+        the plane but not on it, ``crossing_faces`` have vertices on both
+        sides of the plane, and ``vertices_positive_side`` &
+        ``vertices_negative_side`` count the vertices on each side (all
+        should be on one side).
         ``modifiers`` lists the modifier stack, with ``settings`` for
         Mirror, Subdivision Surface and Multiresolution.
         ``subdivision_size`` compares the object-space size of the cage
         (mirrored) with the result after modifiers, as subdivision shrinks
-        the shape. ``warnings`` points out problems in the modifier stack.
+        the shape. It is ``None`` in Edit Mode, and unless the enabled
+        modifiers are joined Mirror modifiers followed by subdivision.
+        ``warnings`` points out problems in the stack of enabled modifiers.
+        Non-finite coordinates are reported as strings (e.g. ``"inf"``).
         """
         p = Params(name=name)
         code = toolcode_format_call(_TOOL_CALL, p)
