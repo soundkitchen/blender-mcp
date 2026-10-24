@@ -7,6 +7,7 @@ Shared helpers for tool modules.
 """
 
 __all__ = (
+    "data_dir",
     "toolcode_format_call",
     "toolcode_load_from_filepath",
     "toolcode_wrap_with_calling_convention",
@@ -15,6 +16,16 @@ __all__ = (
 import os
 
 _PARAMS_PLACEHOLDER = "__BLMCP_PARAMS__"
+
+
+def data_dir() -> str:
+    """
+    Return the directory of the data files bundled with the package (``blmcp/data``).
+    """
+    return os.path.join(
+        os.path.dirname(os.path.dirname(os.path.normpath(os.path.abspath(__file__)))),
+        "data",
+    )
 
 
 def toolcode_format_call(toolcode_template: str, params: object) -> str:

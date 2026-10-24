@@ -1641,7 +1641,13 @@ class _TestServerMixin:
         self.assertEqual(data["topic"], "character")
         guide = str(data["guide"])
         self.assertIn("get_mesh_topology_summary", guide)
-        code = guide.split("```python\n", 1)[1].split("```", 1)[0]
+
+        def example(name: str) -> str:
+            # The code block following the `<!-- example: name -->` marker.
+            after = guide.split("<!-- example: {:s} -->".format(name), 1)[1]
+            return after.split("```python\n", 1)[1].split("```", 1)[0]
+
+        code = example("character")
 
         data = self._test_tool("execute_blender_code", {"code": code})
         self.assertEqual(data["object"], "Character")
@@ -1672,9 +1678,28 @@ class _TestServerMixin:
         self.assertAlmostEqual(bounds["size"][2], 1.7, delta=0.02)
         self.assertAlmostEqual(bounds["min"][2], 0.0, delta=0.01)
 
+        # The ground contact snippet, also with a rotated, scaled and raised parent.
+        def code_parent() -> None:
+            import math
+            import bpy  # type: ignore[import-not-found]
+            parent = bpy.data.objects.new("Parent", None)
+            bpy.context.scene.collection.objects.link(parent)
+            parent.location = (0.0, 0.0, 0.5)
+            parent.rotation_euler = (0.0, 0.0, math.radians(30.0))
+            parent.scale = (2.0, 2.0, 2.0)
+            bpy.data.objects["Character"].parent = parent
+            result = {'ok': True}  # noqa: F841
+        self._test_tool("execute_blender_code", {"code": _python_fn_body_as_string(code_parent)})
+        self._test_tool("execute_blender_code", {"code": example("ground-contact")})
+        data = self._test_tool("get_object_geometry_summary", {"names": ["Character"]})
+        self.assertAlmostEqual(data["objects"][0]["bounds_world"]["min"][2], 0.0, places=4)
+
     def test_get_modeling_guide_error(self) -> None:
         content = self._call_tool_expect_error("get_modeling_guide", {"topic": "NONEXISTENT"})
-        self.assertIn("topic", str(content[0].get("text", "")))
+        # Rejected by the argument validation, listing the valid topics.
+        text = str(content[0].get("text", ""))
+        self.assertIn("literal_error", text)
+        self.assertIn("'character'", text)
 
     def test_get_scene_render_summary(self) -> None:
         data = self._test_tool("get_scene_render_summary")

@@ -38,19 +38,8 @@ converting it to a mesh.
    `bounds_min`/`bounds_max`), add edge loops where a shape needs more detail
    (`bmesh.ops.subdivide_edgering`).
 7. **Ground contact.** Subdivision shrinks the shape: check the lowest point after modifiers
-   (`bounds_world` of `get_object_geometry_summary`, or the code below) and move the cage
-   down if it floats:
-
-   ```
-   depsgraph = bpy.context.evaluated_depsgraph_get()
-   obj_eval = obj.evaluated_get(depsgraph)
-   mesh_eval = obj_eval.to_mesh()
-   lowest = min((obj_eval.matrix_world @ v.co).z for v in mesh_eval.vertices)
-   obj_eval.to_mesh_clear()
-   for v in obj.data.vertices:
-       v.co.z -= lowest  # Object space, assuming the object is not rotated or scaled.
-   obj.data.update()
-   ```
+   (`bounds_world` of `get_object_geometry_summary`) and move the cage so it touches the
+   ground, see *Ground contact* below.
 
 ## Pitfalls
 
@@ -85,6 +74,32 @@ converting it to a mesh.
   here, not in the topology summary.
 * A screenshot or render for the final look.
 
+## Ground contact
+
+Moves the cage so the lowest point after modifiers is at world `Z = 0`, also when the object
+or its parents are moved, rotated or scaled. Run it in Object Mode: in Edit Mode, leaving it
+writes the edit-mesh back over these changes.
+
+<!-- example: ground-contact -->
+```python
+import bpy
+from mathutils import Vector
+
+obj = bpy.data.objects["Character"]
+depsgraph = bpy.context.evaluated_depsgraph_get()
+obj_eval = obj.evaluated_get(depsgraph)
+mesh_eval = obj_eval.to_mesh()
+lowest = min((obj_eval.matrix_world @ v.co).z for v in mesh_eval.vertices)
+obj_eval.to_mesh_clear()
+# The world-space offset in object space: moving every vertex by it moves the result
+# by the same world-space offset (the modifiers here don't depend on the position).
+offset = obj.matrix_world.inverted_safe().to_3x3() @ Vector((0.0, 0.0, -lowest))
+for v in obj.data.vertices:
+    v.co += offset
+obj.data.update()
+result = {"moved_by": -lowest}
+```
+
 ## Example
 
 A complete, tested starting point: a base mesh about 1.7 m tall after subdivision
@@ -92,6 +107,7 @@ A complete, tested starting point: a base mesh about 1.7 m tall after subdivisio
 Change `HEIGHT`, the ring tables and the per-ring sizes to adapt the proportions,
 then refine by index as described above.
 
+<!-- example: character -->
 ```python
 import bmesh
 import bpy
@@ -117,6 +133,7 @@ def ring(points, names):
 def extrude(face):
     """Extrude *face*, return the new cap face. New vertices inherit the roles of their sources."""
     old = set(face.verts)
+    edges = set(face.edges)
     res = bmesh.ops.extrude_face_region(bm, geom=[face])
     cap = next(g for g in res["geom"] if isinstance(g, bmesh.types.BMFace))
     for v in cap.verts:
@@ -125,9 +142,13 @@ def extrude(face):
     bmesh.ops.delete(bm, geom=[face], context='FACES_ONLY')
     # Extruding a face with an edge on the mirror plane (X=0) leaves a face on the plane,
     # and deleting it leaves a wire edge across the ring: both would be inside the mirrored mesh.
-    on_plane = [f for f in bm.faces if all(abs(v.co.x) < 1e-6 for v in f.verts)]
+    # Only the new side faces (around the cap) and the edges of the deleted faces need checking.
+    sides = {f for v in cap.verts for f in v.link_faces if f is not cap}
+    on_plane = [f for f in sides if all(abs(v.co.x) < 1e-6 for v in f.verts)]
+    for f in on_plane:
+        edges.update(f.edges)
     bmesh.ops.delete(bm, geom=on_plane, context='FACES_ONLY')
-    bmesh.ops.delete(bm, geom=[e for e in bm.edges if not e.link_faces], context='EDGES')
+    bmesh.ops.delete(bm, geom=[e for e in edges if e.is_valid and not e.link_faces], context='EDGES')
     return cap
 
 
@@ -244,7 +265,7 @@ for p in mesh.polygons:
     p.use_smooth = True
 obj = bpy.data.objects.new(NAME, mesh)
 obj.location = LOCATION
-bpy.context.scene.collection.objects.link(obj)
+bpy.context.collection.objects.link(obj)  # The active collection, keeping the scene's structure.
 mirror = obj.modifiers.new("Mirror", 'MIRROR')
 mirror.use_clip = True        # Keeps the vertices on the mirror plane while editing.
 mirror.use_mirror_merge = True

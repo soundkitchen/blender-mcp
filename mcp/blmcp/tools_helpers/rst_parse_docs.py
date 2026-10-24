@@ -43,14 +43,10 @@ import docutils.parsers.rst  # pylint: disable=import-error
 import docutils.utils  # pylint: disable=import-error
 from docutils.parsers.rst import directives, roles  # pylint: disable=import-error
 
+# Re-exported, the RST helpers resolve their paths with it.
+from blmcp.tools_helpers import data_dir
+
 _DocTree = object
-
-
-def data_dir() -> str:
-    return os.path.join(
-        os.path.dirname(os.path.dirname(os.path.normpath(os.path.abspath(__file__)))),
-        "data",
-    )
 
 
 # ---------------------------------------------------------------------------
