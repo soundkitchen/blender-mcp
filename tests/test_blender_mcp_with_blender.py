@@ -511,6 +511,8 @@ class _TestServerMixin:
                 result.get("isError", False),
                 "Expected {:s} to fail in non-interactive mode".format(name),
             )
+            # The reason reaches the client.
+            self.assertIn("background mode", str(content[0].get("text", "")))
         else:
             self.assertFalse(
                 result.get("isError", False),
@@ -1510,6 +1512,54 @@ class _TestServerMixin:
         self.assertEqual(info["vertices_labeled"], 4)
         self.assertEqual(info["vertices_hidden"], 0)
 
+    def test_render_mesh_wireframe_as_image_downscaled(self) -> None:
+        # A small size limit downscales the image, the layout info matches the returned image.
+        full = self._call_tool_mesh_wireframe({"name": "Cube", "views": ["FRONT", "RIGHT", "TOP"]})
+        small = self._call_tool_mesh_wireframe({
+            "name": "Cube", "views": ["FRONT", "RIGHT", "TOP"], "size_limit_in_bytes": 20000,
+        })
+        self.assertLess(small["image_width"], full["image_width"])
+        scale = small["image_width"] / full["image_width"]
+        self.assertAlmostEqual(small["units_per_pixel"], full["units_per_pixel"] / scale, delta=1e-4)
+        last = small["views"][-1]["rect"]
+        self.assertLessEqual(abs(last[0] + last[2] - small["image_width"]), 1)
+        self.assertLessEqual(abs(last[3] - small["image_height"]), 1)
+
+    def test_render_mesh_wireframe_as_image_width_limit(self) -> None:
+        # Two wide views and a narrow one widened to the minimum panel width still fit the maximum width.
+        info = self._call_tool_mesh_wireframe({
+            "name": "Cube",
+            "views": ["RIGHT", "LEFT", "FRONT"],
+            "bounds_min": [-0.01, -1.0, -1.0],
+            "bounds_max": [0.01, 1.0, 1.0],
+        })
+        self.assertLessEqual(info["image_width"], 2400)
+        self.assertEqual(info["views"][-1]["rect"][0] + info["views"][-1]["rect"][2], info["image_width"])
+
+    def test_render_mesh_wireframe_as_image_edit_mode_hidden(self) -> None:
+        def code() -> None:
+            import bmesh  # type: ignore[import-not-found]
+            import bpy  # type: ignore[import-not-found]
+            obj = bpy.data.objects["Cube"]
+            bpy.context.view_layer.objects.active = obj
+            bpy.ops.object.mode_set(mode='EDIT')
+            # Hide the front vertices (Y=-1) and the elements using them.
+            bm = bmesh.from_edit_mesh(obj.data)
+            for v in bm.verts:
+                if v.co.y < 0.0:
+                    v.hide_set(True)
+            bmesh.update_edit_mesh(obj.data)
+            result = {'ok': True}  # noqa: F841
+        self._test_tool("execute_blender_code", {
+            "code": _python_fn_body_as_string(code),
+        })
+        info = self._call_tool_mesh_wireframe({"name": "Cube", "views": ["FRONT"]})
+        self.assertEqual(info["vertices_hidden_in_edit_mode"], 4)
+        # With the front face hidden, the back vertices are seen from the front.
+        self.assertEqual(info["vertices_labeled"], 4)
+        self.assertEqual(info["vertices_hidden"], 0)
+        self.assertEqual(info["vertices_outside_bounds"], 0)
+
     def test_render_mesh_wireframe_as_image_edit_mode(self) -> None:
         def code() -> None:
             import bmesh  # type: ignore[import-not-found]
@@ -1537,6 +1587,7 @@ class _TestServerMixin:
                 ({"name": "Light"}, "not a mesh"),
                 ({"name": "NonExistent"}, "'NonExistent' not found"),
                 ({"name": "Cube", "bounds_min": [0.0, 0.0, 0.0]}, "Pass both bounds_min and bounds_max"),
+                ({"name": "Cube", "bounds_min": [0.0, 0.0], "bounds_max": [1.0, 1.0, 1.0]}, "3 finite numbers"),
         ):
             content = self._call_tool_expect_error("render_mesh_wireframe_as_image", arguments)
             self.assertIn(message, str(content[0].get("text", "")))

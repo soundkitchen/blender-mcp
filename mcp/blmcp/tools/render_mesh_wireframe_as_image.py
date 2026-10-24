@@ -52,6 +52,7 @@ def register(mcp: MCPServer) -> None:
         cage (the mesh before modifiers, in Edit Mode including unsynced edits)
         with its edges, and the visible vertices with their index. Edges hidden
         behind the cage are drawn faintly, hidden vertices are not labeled.
+        In Edit Mode, elements hidden by the user are not drawn.
 
         *bounds_min* & *bounds_max* (object space, pass both) limit the drawing
         to a box, zooming in on details, e.g. a character's head.
@@ -65,8 +66,10 @@ def register(mcp: MCPServer) -> None:
         ``units_per_pixel``, the ``bounds_min``
         & ``bounds_max`` drawn, ``vertices_labeled``, ``vertices_unlabeled``
         (visible but skipped to avoid overlaps, the first 100 indices),
-        ``vertices_hidden`` (hidden in every view) and
-        ``vertices_outside_bounds``.
+        ``vertices_hidden`` (behind the cage in every view),
+        ``vertices_outside_bounds`` and, in Edit Mode,
+        ``vertices_hidden_in_edit_mode``. ``rect`` and ``units_per_pixel``
+        match the returned image, also when it was downscaled.
 
         *size_limit_in_bytes* is the target image size in bytes.
         Zero (the default) uses the MCP message size limit.

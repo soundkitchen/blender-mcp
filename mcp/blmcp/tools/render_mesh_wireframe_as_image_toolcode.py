@@ -44,6 +44,7 @@ class Result(NamedTuple):
     vertices_unlabeled: list[int] | None = None
     vertices_hidden: int | None = None
     vertices_outside_bounds: int | None = None
+    vertices_hidden_in_edit_mode: int | None = None
     message: str | None = None
 
 
@@ -78,7 +79,10 @@ _IMAGE_HEIGHT_MAX = 1200
 _IMAGE_WIDTH_MAX = 2400
 _PANEL_MARGIN = 24
 _PANEL_TITLE_HEIGHT = 28
+_PANEL_WIDTH_MIN = 160
 _FONT_SIZE = 13
+# Cell size (pixels) of the grid used to find overlapping labels.
+_LABEL_GRID_CELL = 64
 
 # Colors (RGBA).
 _COLOR_BACKGROUND = (0.13, 0.13, 0.13, 1.0)
@@ -116,6 +120,8 @@ class _Geometry(NamedTuple):
     triangles: list[tuple[int, int, int]]
     # Evaluated mesh (after modifiers) triangles as coordinates.
     evaluated_triangles: list[tuple[float, float, float]]
+    # Cage vertices hidden in Edit Mode, not drawn.
+    vertices_hidden: list[bool]
 
 
 class _Panel(NamedTuple):
@@ -133,13 +139,24 @@ class _Panel(NamedTuple):
     center_up: float
 
 
-def _read_geometry(obj: _Object, bm: _BMesh) -> _Geometry:
+def _read_geometry(obj: _Object, bm: _BMesh, is_edit_mode: bool) -> _Geometry:
+    """
+    Read the cage from *bm*, skipping the elements hidden in Edit Mode.
+    """
     import bpy  # pylint: disable=import-error,no-name-in-module
 
     verts = {v: i for i, v in enumerate(bm.verts)}
     coords = [tuple(v.co) for v in bm.verts]
-    edges = [(verts[e.verts[0]], verts[e.verts[1]]) for e in bm.edges]
-    triangles = [tuple(verts[loop.vert] for loop in tri) for tri in bm.calc_loop_triangles()]
+    # Hide flags are only shown in Edit Mode, in Object Mode the whole mesh is shown.
+    vertices_hidden = [is_edit_mode and v.hide for v in bm.verts]
+    edges = [
+        (verts[e.verts[0]], verts[e.verts[1]])
+        for e in bm.edges if not (is_edit_mode and e.hide)
+    ]
+    triangles = [
+        tuple(verts[loop.vert] for loop in tri)
+        for tri in bm.calc_loop_triangles() if not (is_edit_mode and tri[0].face.hide)
+    ]
 
     evaluated_triangles: list[tuple[float, float, float]] = []
     depsgraph = bpy.context.evaluated_depsgraph_get()
@@ -153,7 +170,7 @@ def _read_geometry(obj: _Object, bm: _BMesh) -> _Geometry:
                 evaluated_triangles.extend(positions[i] for i in tri.vertices)
         finally:
             obj_eval.to_mesh_clear()
-    return _Geometry(coords, edges, triangles, evaluated_triangles)  # type: ignore[arg-type]
+    return _Geometry(coords, edges, triangles, evaluated_triangles, vertices_hidden)  # type: ignore[arg-type]
 
 
 def _screen(co: Any, axis_sign: tuple[int, int]) -> float:
@@ -200,18 +217,30 @@ def _layout(
         extents.append((max(r_hi - r_lo, 1e-6), max(u_hi - u_lo, 1e-6), (r_lo + r_hi) / 2.0, (u_lo + u_hi) / 2.0))
 
     inner_height = _IMAGE_HEIGHT_MAX - 2 * _PANEL_MARGIN - _PANEL_TITLE_HEIGHT
-    inner_width = _IMAGE_WIDTH_MAX - 2 * _PANEL_MARGIN * len(views)
-    pixels_per_unit = min(
-        inner_height / max(e[1] for e in extents),
-        inner_width / sum(e[0] for e in extents),
-    )
+    pixels_per_unit = inner_height / max(e[1] for e in extents)
+    # Fit the width: panels widened to the minimum width don't scale with the drawing,
+    # shrink the others until the total fits (a panel only reaches the minimum when shrinking).
+    for _ in range(len(views) + 1):
+        widths = [e[0] * pixels_per_unit + 2 * _PANEL_MARGIN for e in extents]
+        if sum(max(w, _PANEL_WIDTH_MIN) for w in widths) <= _IMAGE_WIDTH_MAX:
+            break
+        fixed = [w <= _PANEL_WIDTH_MIN for w in widths]
+        scalable = sum(e[0] for e, f in zip(extents, fixed) if not f)
+        available = (
+            _IMAGE_WIDTH_MAX
+            - _PANEL_WIDTH_MIN * fixed.count(True)
+            - 2 * _PANEL_MARGIN * fixed.count(False)
+        )
+        if scalable <= 0.0 or available <= 0:
+            break
+        pixels_per_unit = min(pixels_per_unit, available / scalable)
 
     panel_height = round(max(e[1] for e in extents) * pixels_per_unit) + 2 * _PANEL_MARGIN + _PANEL_TITLE_HEIGHT
     panels = []
     x = 0
     for view, (width, _height, center_right, center_up) in zip(views, extents):
         right, up = _VIEW_AXES[view]
-        panel_width = max(round(width * pixels_per_unit) + 2 * _PANEL_MARGIN, 160)
+        panel_width = max(int(width * pixels_per_unit) + 2 * _PANEL_MARGIN, _PANEL_WIDTH_MIN)
         panels.append(_Panel(view, right, up, x, 0, panel_width, panel_height, center_right, center_up))
         x += panel_width
     return panels, 1.0 / pixels_per_unit, x, panel_height
@@ -231,8 +260,6 @@ def _panel_matrix(
     # The drawable area excludes the title at the top of the panel.
     half_width = panel.width * units_per_pixel / 2.0
     half_height = (panel.height - _PANEL_TITLE_HEIGHT) * units_per_pixel / 2.0
-    # Shift the center down by half the title, keeping the drawing centered below it.
-    center_up = panel.center_up + _PANEL_TITLE_HEIGHT * units_per_pixel / 2.0
     depth_lo, depth_hi = depth_range
     depth_half = max((depth_hi - depth_lo) / 2.0, 1e-6)
     depth_center = (depth_lo + depth_hi) / 2.0
@@ -240,7 +267,7 @@ def _panel_matrix(
     rows = []
     for (axis, sign), center, half in (
             (panel.right, panel.center_right, half_width),
-            (panel.up, center_up, half_height),
+            (panel.up, panel.center_up, half_height),
     ):
         row = [0.0, 0.0, 0.0, -center / half]
         row[axis] = sign / half
@@ -258,12 +285,30 @@ def _panel_matrix(
 def _to_pixel(co: Any, panel: _Panel, units_per_pixel: float) -> tuple[float, float]:
     """
     Return the image pixel position of *co* in *panel*.
+
+    The drawing area is the panel below its title, matching the viewport of ``_draw_panel``.
     """
-    center_up = panel.center_up + _PANEL_TITLE_HEIGHT * units_per_pixel / 2.0
     px = panel.x + panel.width / 2.0 + (_screen(co, panel.right) - panel.center_right) / units_per_pixel
-    py = panel.y + (panel.height - _PANEL_TITLE_HEIGHT) / 2.0 + (_screen(co, panel.up) - center_up) / units_per_pixel
-    # The title strip is at the top, the drawing area starts at the panel's bottom.
+    py = panel.y + (panel.height - _PANEL_TITLE_HEIGHT) / 2.0 + (_screen(co, panel.up) - panel.center_up) / units_per_pixel
     return px, py
+
+
+def _depth_min_filter(depth_buffer: Any, width: int, height: int) -> Any:
+    """
+    Return the depth buffer as a ``(height, width)`` array, each pixel holding
+    the closest depth within ``_VERTEX_DEPTH_RADIUS`` pixels around it.
+    """
+    import numpy as np  # pylint: disable=import-error
+
+    depth = np.asarray(depth_buffer, dtype=np.float32).reshape(height, width)
+    r = _VERTEX_DEPTH_RADIUS
+    # Pad with the far depth so the edges of the panel compare with nothing in front.
+    padded = np.pad(depth, r, mode='constant', constant_values=1.0)
+    result = depth.copy()
+    for dy in range(2 * r + 1):
+        for dx in range(2 * r + 1):
+            np.minimum(result, padded[dy:dy + height, dx:dx + width], out=result)
+    return result
 
 
 def _draw_panel(
@@ -271,7 +316,7 @@ def _draw_panel(
         geometry: _Geometry,
         units_per_pixel: float,
         depth_range: tuple[float, float],
-        in_bounds: list[bool],
+        drawn: list[bool],
         framebuffer: Any,
 ) -> list[bool]:
     """
@@ -313,8 +358,7 @@ def _draw_panel(
         # Read the depth of the faces to test which vertices are visible.
         width = panel.width
         height = panel.height - _PANEL_TITLE_HEIGHT
-        depth_buffer = framebuffer.read_depth(panel.x, panel.y, width, height)
-        depth_buffer.dimensions = width * height
+        face_depth = _depth_min_filter(framebuffer.read_depth(panel.x, panel.y, width, height), width, height)
 
         gpu.matrix.load_projection_matrix(_panel_matrix(panel, units_per_pixel, depth_range))
         gpu.state.depth_mask_set(False)
@@ -332,7 +376,7 @@ def _draw_panel(
     depth_half = max((depth_hi - depth_lo) / 2.0, 1e-6)
     depth_center = (depth_lo + depth_hi) / 2.0
     visible = []
-    for co, inside in zip(coords, in_bounds):
+    for co, inside in zip(coords, drawn):
         if not inside:
             visible.append(False)
             continue
@@ -344,13 +388,16 @@ def _draw_panel(
             continue
         ndc = (depth_center - _depth(co, panel.right, panel.up)) / depth_half
         window_depth = (ndc + 1.0) / 2.0
-        face_depth = min(
-            depth_buffer[y * width + x]
-            for y in range(max(iy - _VERTEX_DEPTH_RADIUS, 0), min(iy + _VERTEX_DEPTH_RADIUS + 1, height))
-            for x in range(max(ix - _VERTEX_DEPTH_RADIUS, 0), min(ix + _VERTEX_DEPTH_RADIUS + 1, width))
-        )
-        visible.append(window_depth <= face_depth + _VERTEX_DEPTH_TOLERANCE)
+        visible.append(window_depth <= float(face_depth[iy, ix]) + _VERTEX_DEPTH_TOLERANCE)
     return visible
+
+
+def _grid_cells(box: tuple[float, float, float, float]) -> list[tuple[int, int]]:
+    """
+    Return the label grid cells covered by *box*.
+    """
+    x0, y0, x1, y1 = (int(v // _LABEL_GRID_CELL) for v in box)
+    return [(x, y) for x in range(x0, x1 + 1) for y in range(y0, y1 + 1)]
 
 
 def _draw_labels(
@@ -406,8 +453,12 @@ def _draw_labels(
             blf.position(font_id, panel.x + 8, panel.y + panel.height - _PANEL_TITLE_HEIGHT + 8, 0)
             blf.draw(font_id, title)
 
+            # Labels stay inside the drawing area (below the title, inside the border).
+            area = (panel.x + 1, panel.y + 1, panel.x + panel.width - 1, panel.y + panel.height - _PANEL_TITLE_HEIGHT)
             points = []
             boxes: list[tuple[float, float, float, float]] = []
+            # Boxes by the grid cells they cover, so each label is only tested against its neighbors.
+            grid: dict[tuple[int, int], list[tuple[float, float, float, float]]] = {}
             label_draws = []
             for index, co in enumerate(geometry.coords):
                 if not visible[index]:
@@ -419,15 +470,23 @@ def _draw_labels(
                 placed = None
                 for dx, dy in ((4, 4), (4, -text_height - 4), (-text_width - 4, 4), (-text_width - 4, -text_height - 4)):
                     box = (px + dx - 2, py + dy - 2, px + dx + text_width + 2, py + dy + text_height + 2)
-                    if any(box[0] < b[2] and b[0] < box[2] and box[1] < b[3] and b[1] < box[3] for b in boxes):
+                    if not (area[0] <= box[0] and box[2] <= area[2] and area[1] <= box[1] and box[3] <= area[3]):
                         continue
-                    placed = (box, px + dx, py + dy)
+                    cells = _grid_cells(box)
+                    if any(
+                            box[0] < b[2] and b[0] < box[2] and box[1] < b[3] and b[1] < box[3]
+                            for cell in cells for b in grid.get(cell, ())
+                    ):
+                        continue
+                    placed = (box, cells, px + dx, py + dy)
                     break
                 if placed is None:
                     unlabeled.add(index)
                     continue
                 boxes.append(placed[0])
-                label_draws.append((text, placed[1], placed[2]))
+                for cell in placed[1]:
+                    grid.setdefault(cell, []).append(placed[0])
+                label_draws.append((text, placed[2], placed[3]))
                 labeled.add(index)
 
             if points:
@@ -457,7 +516,7 @@ def _render(
         units_per_pixel: float,
         image_size: tuple[int, int],
         depth_ranges: list[tuple[float, float]],
-        in_bounds: list[bool],
+        drawn: list[bool],
         filepath: str,
 ) -> tuple[set[int], set[int], int]:
     """
@@ -469,13 +528,21 @@ def _render(
     import imbuf  # type: ignore[import-not-found]  # pylint: disable=import-error,no-name-in-module
 
     image_width, image_height = image_size
+    # Restore the global GPU state afterwards, the UI draws with it (the point size has no getter,
+    # it's reset to the default).
+    state = (
+        gpu.state.blend_get(),
+        gpu.state.depth_test_get(),
+        gpu.state.depth_mask_get(),
+        gpu.state.viewport_get(),
+    )
     offscreen = gpu.types.GPUOffScreen(image_width, image_height, format='RGBA8')
     try:
         with offscreen.bind():
             framebuffer = gpu.state.active_framebuffer_get()
             framebuffer.clear(color=_COLOR_BACKGROUND, depth=1.0)
             visibility = [
-                _draw_panel(panel, geometry, units_per_pixel, depth_range, in_bounds, framebuffer)
+                _draw_panel(panel, geometry, units_per_pixel, depth_range, drawn, framebuffer)
                 for panel, depth_range in zip(panels, depth_ranges)
             ]
             labeled, unlabeled = _draw_labels(panels, geometry, units_per_pixel, visibility, image_size)
@@ -484,6 +551,12 @@ def _render(
             pixels = framebuffer.read_color(0, 0, image_width, image_height, 4, 0, 'UBYTE')
     finally:
         offscreen.free()
+        blend, depth_test, depth_mask, viewport = state
+        gpu.state.blend_set(blend)
+        gpu.state.depth_test_set(depth_test)
+        gpu.state.depth_mask_set(depth_mask)
+        gpu.state.viewport_set(*viewport)
+        gpu.state.point_size_set(1.0)
 
     pixels.dimensions = image_width * image_height * 4
     im = imbuf.new((image_width, image_height))
@@ -495,7 +568,7 @@ def _render(
         im.free()
 
     hidden = sum(
-        1 for index, inside in enumerate(in_bounds)
+        1 for index, inside in enumerate(drawn)
         if inside and not any(visible[index] for visible in visibility)
     )
     return labeled, unlabeled, hidden
@@ -518,6 +591,7 @@ def _gpu_ensure() -> None:
 
 def main(params: Params) -> Result:
     import base64
+    import math
     import os
     import struct
     import tempfile
@@ -535,17 +609,20 @@ def main(params: Params) -> Result:
         return Result(status="error", message="At least one view is required")
     if (params.bounds_min is None) != (params.bounds_max is None):
         return Result(status="error", message="Pass both bounds_min and bounds_max, or neither")
+    for bounds in (params.bounds_min, params.bounds_max):
+        if bounds is not None and (len(bounds) != 3 or not all(math.isfinite(v) for v in bounds)):
+            return Result(status="error", message="bounds_min and bounds_max must be 3 finite numbers (X, Y, Z)")
 
     mesh = obj.data
     is_edit_mode = mesh.is_editmode
     if is_edit_mode:
         # Read the edit-mesh so unsynced edits are included, it's only read, never modified.
-        geometry = _read_geometry(obj, bmesh.from_edit_mesh(mesh))
+        geometry = _read_geometry(obj, bmesh.from_edit_mesh(mesh), is_edit_mode)
     else:
         bm = bmesh.new()
         try:
             bm.from_mesh(mesh)
-            geometry = _read_geometry(obj, bm)
+            geometry = _read_geometry(obj, bm, is_edit_mode)
         finally:
             bm.free()
     if not geometry.coords:
@@ -566,6 +643,8 @@ def main(params: Params) -> Result:
         all(lo <= c <= hi for c, lo, hi in zip(co, bounds_min, bounds_max))
         for co in geometry.coords
     ]
+    # Vertices hidden in Edit Mode are not drawn (nor counted as outside the bounds).
+    drawn = [inside and not hidden for inside, hidden in zip(in_bounds, geometry.vertices_hidden)]
 
     panels, units_per_pixel, image_width, image_height = _layout(views, bounds_min, bounds_max)
 
@@ -584,7 +663,7 @@ def main(params: Params) -> Result:
     with tempfile.TemporaryDirectory(prefix="blmcp_wireframe_") as tmpdir:
         filepath = os.path.join(tmpdir, "wireframe.png")
         labeled, unlabeled, hidden = _render(
-            geometry, panels, units_per_pixel, (image_width, image_height), depth_ranges, in_bounds, filepath,
+            geometry, panels, units_per_pixel, (image_width, image_height), depth_ranges, drawn, filepath,
         )
         size_limit = params.size_limit_in_bytes if params.size_limit_in_bytes > 0 else _IMAGE_SIZE_LIMIT_IN_BYTES
         # Defined by `_template_image_downscale_to_size_limit.py`.
@@ -592,8 +671,11 @@ def main(params: Params) -> Result:
             tmpdir, filepath, size_limit_in_bytes=size_limit, use_hidpi_downscale=False,
         )
 
-    # The size of the returned image, it may have been downscaled (from the PNG header).
+    # The returned image may have been downscaled to fit the size limit (its size is in the PNG header),
+    # scale the layout to match.
+    drawn_width = image_width
     image_width, image_height = struct.unpack(">II", image_data[16:24])
+    scale = image_width / drawn_width
     sorted_unlabeled = sorted(unlabeled)
     return Result(
         status="ok",
@@ -606,15 +688,18 @@ def main(params: Params) -> Result:
                 "view": panel.view,
                 "right": ("+" if panel.right[1] > 0 else "-") + _AXIS_NAMES[panel.right[0]],
                 "up": ("+" if panel.up[1] > 0 else "-") + _AXIS_NAMES[panel.up[0]],
-                "rect": [panel.x, panel.y, panel.width, panel.height],
+                "rect": [round(v * scale) for v in (panel.x, panel.y, panel.width, panel.height)],
             }
             for panel in panels
         ],
-        units_per_pixel=round(units_per_pixel, 8),
+        units_per_pixel=round(units_per_pixel / scale, 8),
         bounds_min=[round(v, 6) for v in bounds_min],
         bounds_max=[round(v, 6) for v in bounds_max],
         vertices_labeled=len(labeled),
         vertices_unlabeled=sorted_unlabeled[:_UNLABELED_MAX],
         vertices_hidden=hidden,
-        vertices_outside_bounds=in_bounds.count(False),
+        vertices_outside_bounds=sum(
+            1 for inside, hidden in zip(in_bounds, geometry.vertices_hidden) if not inside and not hidden
+        ),
+        vertices_hidden_in_edit_mode=sum(geometry.vertices_hidden) if is_edit_mode else None,
     )
