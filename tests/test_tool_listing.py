@@ -216,6 +216,58 @@ EXPECTED_TOOLS = [
         }
     },
     {
+        "name": "get_mesh_topology_summary",
+        "description": "\n"
+        "Return topology checks of the mesh object *name*, for use as a subdivision surface cage.\n"
+        "\n"
+        "Use while modeling with subdivision (e.g. characters) to find\n"
+        "triangles, n-gons, poles, holes and symmetry problems in the cage.\n"
+        "\n"
+        "The cage is the mesh before modifiers (in Edit Mode, including\n"
+        "unsynced edits). Vertices are listed by ``index`` with their\n"
+        "object-space ``co``, edges by ``index`` and ``vertices``, faces by\n"
+        "``index``, ``sides`` and ``center``. Each check holds the ``count``\n"
+        "and the first 50 ``items``.\n"
+        "\n"
+        "``faces`` counts ``quads`` and lists ``triangles`` and ``ngons``.\n"
+        "``poles`` lists vertices with 3 (``valence_3``) or 5 or more\n"
+        "(``valence_5_plus``) edges on the subdivided surface (boundary\n"
+        "vertices are skipped, except on a mirror plane where their mirrored\n"
+        "valence is used).\n"
+        "``boundary_edges`` are open edges (holes), edges on a mirror plane\n"
+        "are not included. ``non_manifold_edges`` have more than two faces,\n"
+        "``wire_edges`` none, ``loose_vertices`` have no edges.\n"
+        "``inconsistent_normal_edges`` join faces whose normals are flipped\n"
+        "relative to each other.\n"
+        "``creases`` counts edges and vertices with a crease, ``sharp_edges``\n"
+        "the edges marked sharp.\n"
+        "\n"
+        "``symmetry`` checks each axis of the Mirror modifiers (without a\n"
+        "mirror object): ``off_center_vertices`` are close to the mirror plane\n"
+        "but further than ``tolerance`` (the merge distance) from it,\n"
+        "``crossing_faces`` have vertices on both sides of the plane, and\n"
+        "``vertices_positive_side`` & ``vertices_negative_side`` count the\n"
+        "vertices on each side (all should be on one side).\n"
+        "``modifiers`` lists the modifier stack, with ``settings`` for\n"
+        "Mirror, Subdivision Surface and Multiresolution.\n"
+        "``subdivision_size`` compares the object-space size of the cage\n"
+        "(mirrored) with the result after modifiers, as subdivision shrinks\n"
+        "the shape. ``warnings`` points out problems in the modifier stack.\n",
+        "inputSchema": {
+            "properties": {
+                "name": {
+                    "title": "Name",
+                    "type": "string"
+                }
+            },
+            "required": [
+                "name"
+            ],
+            "title": "get_mesh_topology_summaryArguments",
+            "type": "object"
+        }
+    },
+    {
         "name": "get_node_tree_summary",
         "description": "\n"
         "Return the nodes of a node tree with their settings, input values and links.\n"

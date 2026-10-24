@@ -1168,6 +1168,168 @@ class _TestServerMixin:
         self.assertIn("'NonExistent' not found", data["message"])
         self.assertIn("Material", data["message"])
 
+    def test_get_mesh_topology_summary_mirror(self) -> None:
+        def code() -> None:
+            import bmesh  # type: ignore[import-not-found]
+            import bpy  # type: ignore[import-not-found]
+            # The positive X half of a cube, open on the mirror plane.
+            mesh = bpy.data.meshes.new("Half")
+            bm = bmesh.new()
+            bmesh.ops.create_cube(bm, size=2.0)
+            bmesh.ops.bisect_plane(
+                bm, geom=bm.verts[:] + bm.edges[:] + bm.faces[:],
+                plane_co=(0.0, 0.0, 0.0), plane_no=(1.0, 0.0, 0.0), clear_inner=True,
+            )
+            # The bisect fills nothing, so the cut is an open boundary on X=0.
+            # Move one vertex on the plane slightly off it.
+            moved = next(v for v in bm.verts if abs(v.co.x) < 1e-6 and v.co.y > 0.0 and v.co.z > 0.0)
+            moved.co.x = 0.005
+            bm.to_mesh(mesh)
+            bm.free()
+            obj = bpy.data.objects.new("Half", mesh)
+            bpy.context.scene.collection.objects.link(obj)
+            mirror = obj.modifiers.new("Mirror", 'MIRROR')
+            mirror.use_clip = True
+            obj.modifiers.new("Subdivision", 'SUBSURF').levels = 2
+            result = {'ok': True}  # noqa: F841
+        self._test_tool("execute_blender_code", {
+            "code": _python_fn_body_as_string(code),
+        })
+        data = self._test_tool("get_mesh_topology_summary", {"name": "Half"})
+        self.assertEqual(data["status"], "ok")
+        self.assertFalse(data["is_edit_mode"])
+        self.assertEqual(data["counts"], {"vertices": 8, "edges": 12, "faces": 5})
+        self.assertEqual(data["faces"]["quads"], 5)
+        self.assertEqual(data["faces"]["triangles"]["count"], 0)
+
+        # Only the 4 outer corners are poles, those on the mirror plane get 4 edges once mirrored.
+        poles = data["poles"]
+        self.assertEqual(poles["valence_3"]["count"], 4)
+        for item in poles["valence_3"]["items"]:
+            self.assertAlmostEqual(item["co"][0], 1.0, places=5)
+        self.assertEqual(poles["valence_5_plus"]["count"], 0)
+
+        (symmetry,) = data["symmetry"]
+        self.assertEqual(symmetry["axis"], "X")
+        self.assertEqual(symmetry["modifier"], "Mirror")
+        self.assertTrue(symmetry["use_clip"])
+        self.assertEqual(symmetry["vertices_negative_side"], 0)
+        off_center = symmetry["off_center_vertices"]
+        self.assertEqual(off_center["count"], 1)
+        self.assertAlmostEqual(off_center["items"][0]["co"][0], 0.005, places=5)
+        self.assertEqual(symmetry["crossing_faces"]["count"], 0)
+        # Edges on the mirror plane are not holes, the 2 using the moved vertex are.
+        self.assertEqual(data["boundary_edges"]["count"], 2)
+
+        self.assertEqual([m["name"] for m in data["modifiers"]], ["Mirror", "Subdivision"])
+        self.assertEqual(data["modifiers"][1]["settings"]["levels"], 2)
+        self.assertNotIn("open_advanced_panel", data["modifiers"][1]["settings"])
+        self.assertEqual(data["warnings"], [])
+
+        # Subdivision shrinks the mirrored cage (2 x 2 x 2).
+        size = data["subdivision_size"]
+        for cage, ratio in zip(size["cage"], size["ratio"]):
+            self.assertAlmostEqual(cage, 2.0, places=2)
+            self.assertLess(ratio, 1.0)
+
+    def test_get_mesh_topology_summary_problems(self) -> None:
+        def code() -> None:
+            import bmesh  # type: ignore[import-not-found]
+            import bpy  # type: ignore[import-not-found]
+            from mathutils import Vector  # type: ignore[import-not-found]
+            mesh = bpy.data.meshes.new("Problems")
+            bm = bmesh.new()
+            # A 3 x 3 grid of quads, face centers at -2/3, 0 and 2/3 on X and Y.
+            bmesh.ops.create_grid(bm, x_segments=3, y_segments=3, size=1.0)
+
+            def face_at(x: float, y: float) -> object:
+                return min(bm.faces, key=lambda f: (f.calc_center_median() - Vector((x, y, 0.0))).length)
+
+            third = 2.0 / 3.0
+            face_at(-third, third).normal_flip()
+            bmesh.ops.triangulate(bm, faces=[face_at(third, third)])
+            # Merge the two bottom-left quads into a hexagon.
+            quad_a = face_at(-third, -third)
+            quad_b = face_at(0.0, -third)
+            shared = next(e for e in quad_a.edges if quad_b in e.link_faces)
+            bmesh.ops.dissolve_edges(bm, edges=[shared])
+            # A separate wire edge and a loose vertex.
+            v1 = bm.verts.new((3.0, 0.0, 0.0))
+            v2 = bm.verts.new((3.0, 1.0, 0.0))
+            bm.edges.new((v1, v2))
+            bm.verts.new((4.0, 0.0, 0.0))
+            bm.to_mesh(mesh)
+            bm.free()
+            mesh.edge_creases_ensure().data[0].value = 1.0
+            sharp = mesh.attributes.new("sharp_edge", 'BOOLEAN', 'EDGE')
+            sharp.data[0].value = True
+            sharp.data[1].value = True
+            obj = bpy.data.objects.new("Problems", mesh)
+            bpy.context.scene.collection.objects.link(obj)
+            # Subdivision before Mirror, without clipping.
+            obj.modifiers.new("Subdivision", 'SUBSURF')
+            obj.modifiers.new("Mirror", 'MIRROR').use_clip = False
+            result = {'ok': True}  # noqa: F841
+        self._test_tool("execute_blender_code", {
+            "code": _python_fn_body_as_string(code),
+        })
+        data = self._test_tool("get_mesh_topology_summary", {"name": "Problems"})
+        self.assertEqual(data["status"], "ok")
+        faces = data["faces"]
+        self.assertEqual(faces["triangles"]["count"], 2)
+        self.assertEqual(faces["ngons"]["count"], 1)
+        self.assertEqual(faces["ngons"]["items"][0]["sides"], 6)
+        self.assertEqual(data["wire_edges"]["count"], 1)
+        self.assertEqual(data["loose_vertices"]["count"], 1)
+        self.assertEqual(data["loose_vertices"]["items"][0]["co"], [4.0, 0.0, 0.0])
+        self.assertEqual(data["non_manifold_edges"]["count"], 0)
+        # The flipped face is joined to 2 neighbors.
+        self.assertEqual(data["inconsistent_normal_edges"]["count"], 2)
+        self.assertGreater(data["boundary_edges"]["count"], 0)
+        self.assertEqual(data["creases"], {"edges": 1, "vertices": 0})
+        self.assertEqual(data["sharp_edges"], 2)
+
+        warnings = data["warnings"]
+        self.assertEqual(len(warnings), 2)
+        self.assertIn("comes before Mirror", warnings[0])
+        self.assertIn("clipping disabled", warnings[1])
+
+    def test_get_mesh_topology_summary_edit_mode(self) -> None:
+        def code() -> None:
+            import bmesh  # type: ignore[import-not-found]
+            import bpy  # type: ignore[import-not-found]
+            obj = bpy.data.objects["Cube"]
+            bpy.context.view_layer.objects.active = obj
+            bpy.ops.object.mode_set(mode='EDIT')
+            # Poke one face into 4 triangles, without syncing to the mesh.
+            bm = bmesh.from_edit_mesh(obj.data)
+            bm.faces.ensure_lookup_table()
+            bmesh.ops.poke(bm, faces=[bm.faces[0]])
+            result = {'faces': len(obj.data.polygons)}  # noqa: F841
+        data = self._test_tool("execute_blender_code", {
+            "code": _python_fn_body_as_string(code),
+        })
+        self.assertEqual(data["faces"], 6)
+
+        data = self._test_tool("get_mesh_topology_summary", {"name": "Cube"})
+        self.assertEqual(data["status"], "ok")
+        self.assertTrue(data["is_edit_mode"])
+        self.assertEqual(data["counts"], {"vertices": 9, "edges": 16, "faces": 9})
+        self.assertEqual(data["faces"]["triangles"]["count"], 4)
+        # The corners of the poked face get a 4th edge, the other 4 corners keep 3.
+        self.assertEqual(data["poles"]["valence_3"]["count"], 4)
+        self.assertIsNone(data["subdivision_size"])
+        self.assertEqual(data["symmetry"], [])
+
+    def test_get_mesh_topology_summary_error(self) -> None:
+        data = self._test_tool("get_mesh_topology_summary", {"name": "Light"})
+        self.assertEqual(data["status"], "error")
+        self.assertIn("not a mesh", data["message"])
+
+        data = self._test_tool("get_mesh_topology_summary", {"name": "NonExistent"})
+        self.assertEqual(data["status"], "error")
+        self.assertIn("'NonExistent' not found", data["message"])
+
     def test_get_scene_render_summary(self) -> None:
         data = self._test_tool("get_scene_render_summary")
         self.assertEqual(data["status"], "ok")
