@@ -76,9 +76,11 @@ converting it to a mesh.
 
 ## Ground contact
 
-Moves the cage so the lowest point after modifiers is at world `Z = 0`, also when the object
-or its parents are moved, rotated or scaled. Run it in Object Mode: in Edit Mode, leaving it
-writes the edit-mesh back over these changes.
+Moves the cage so the lowest point after modifiers is at world `Z = 0`, keeping the object's
+origin where it is (e.g. at the feet). The object and its parents may be moved, scaled and
+rotated around `Z` only: when tilted, the offset would move the cage along its own `X` axis,
+off the mirror plane, opening the seam (the code stops instead). Run it in Object Mode:
+in Edit Mode, leaving it writes the edit-mesh back over these changes.
 
 <!-- example: ground-contact -->
 ```python
@@ -92,8 +94,10 @@ mesh_eval = obj_eval.to_mesh()
 lowest = min((obj_eval.matrix_world @ v.co).z for v in mesh_eval.vertices)
 obj_eval.to_mesh_clear()
 # The world-space offset in object space: moving every vertex by it moves the result
-# by the same world-space offset (the modifiers here don't depend on the position).
+# by the same world-space offset, as long as it stays in the mirror plane (no X part).
 offset = obj.matrix_world.inverted_safe().to_3x3() @ Vector((0.0, 0.0, -lowest))
+if abs(offset.x) > 1e-6:
+    raise RuntimeError("The object is tilted, moving the cage would open the mirror seam")
 for v in obj.data.vertices:
     v.co += offset
 obj.data.update()

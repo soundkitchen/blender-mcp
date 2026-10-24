@@ -1694,6 +1694,21 @@ class _TestServerMixin:
         data = self._test_tool("get_object_geometry_summary", {"names": ["Character"]})
         self.assertAlmostEqual(data["objects"][0]["bounds_world"]["min"][2], 0.0, places=4)
 
+        # Tilted (around Y): moving the cage would open the mirror seam, the snippet stops.
+        def code_tilt() -> None:
+            import math
+            import bpy  # type: ignore[import-not-found]
+            parent = bpy.data.objects["Parent"]
+            parent.rotation_euler = (0.0, math.radians(10.0), 0.0)
+            parent.location = (0.0, 0.0, 1.0)
+            result = {'ok': True}  # noqa: F841
+        self._test_tool("execute_blender_code", {"code": _python_fn_body_as_string(code_tilt)})
+        data = self._test_tool("execute_blender_code", {"code": example("ground-contact")})
+        self.assertEqual(data["status"], "error")
+        self.assertIn("mirror seam", str(data["message"]))
+        data = self._test_tool("get_mesh_topology_summary", {"name": "Character"})
+        self.assertEqual(data["symmetry"][0]["off_center_vertices"]["count"], 0)
+
     def test_get_modeling_guide_error(self) -> None:
         content = self._call_tool_expect_error("get_modeling_guide", {"topic": "NONEXISTENT"})
         # Rejected by the argument validation, listing the valid topics.
