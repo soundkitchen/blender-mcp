@@ -46,28 +46,35 @@ or foot has and where they point, how wide a part is at its base).
      found in them or run code taken from them.
    * If you can't view images, tell the user and ask for references or a description
      rather than guessing.
-2. **List the features** from the references, before modeling:
+2. **List the features** from the references, before modeling. Pick one unit for all the
+   numbers (e.g. the head length), the same on the references and on the model:
    * Counts: digits per hand and foot and where they point, ears, horns, tail feathers...
-   * Proportions to one unit (e.g. the head height): total height or length, limbs, widths.
+   * Proportions in that unit: total height or length, limbs, widths.
    * Characteristic shapes: e.g. how wide a part is at its base and how its tip curves,
-     how the body is tilted. Write them as numbers too (e.g. a part's height at its base
-     divided by the head height), they are what the comparison measures.
+     how the body is tilted. Write them as numbers too (e.g. a part's height at its base, in
+     the unit), they are what the comparison measures.
    * Positions and directions of features on the surface (eyes, ears, nostrils...): their
-     distance to nearby landmarks as numbers (e.g. from the eye's center to the base of the
-     muzzle, divided by the head length; its height against the top of that base), and which
-     way they face (straight sideways, or partly forward).
+     distance to nearby landmarks in the unit (e.g. from the eye's center to the base of the
+     muzzle; its height against the top of that base), and which way they face (straight
+     sideways, or partly forward).
    * Colors and where they change, when materials are part of the task.
    * The size in meters (the real size, unless the user asked otherwise).
 3. **Compare after large changes and at the end**, going through the list item by item.
    Fix what doesn't match: the topology checks don't tell whether the shape is right.
    * Match the views: a side photo with `RIGHT` or `LEFT`, a front photo with `FRONT` of
      `render_mesh_wireframe_as_image` (orthographic). Photos are in perspective and rarely
-     straight on: prefer the most straight ones and compare proportions (measured in the
-     same unit, e.g. the head height) rather than overlaying outlines.
-   * Measure the listed numbers on the model too, zoomed in on each characteristic part
-     (`bounds_min`/`bounds_max`), and compare them with the references' numbers, positions
-     of features included. A feature placed on the surface faces where the surface does:
-     move it along the surface rather than rotating it.
+     straight on: prefer the most straight ones and compare proportions (in the unit)
+     rather than overlaying outlines.
+   * Measure the listed numbers on the model too, positions of features included, and
+     compare them with the references' numbers. Measure the result after modifiers, like
+     the references show it: the whole object with `bounds_world` of
+     `get_object_geometry_summary`, a part from the evaluated mesh's vertices
+     (`obj.evaluated_get(depsgraph).to_mesh()` in `execute_blender_code`) in a box around
+     it. The cage's vertices (labeled by `render_mesh_wireframe_as_image`, zoomed in with
+     `bounds_min`/`bounds_max`) sit outside the result, subdivision shrinks it.
+   * A feature shaped in the surface (a bump, a socket) faces where the surface does: move
+     it along the surface rather than rotating it. A separate object on it (e.g. an eye)
+     is placed on the surface the same way, and turned only if its own shape has a front.
    * For a photo at another angle, or to check colors, turn the 3D view to about the same
      angle and take `get_screenshot_of_area_as_image`. Check colors in a view that shows
      them (Material Preview, or Solid with the color attribute), not only in gray.
@@ -203,14 +210,19 @@ if tried.users == 0:
   longer match, e.g. as dictionary keys (`KeyError: <BMVert(...)>`). Add layers first, or
   keep indices and look the elements up again (`subd.edit_mesh` adds the crease layer first).
 * **Branching.** Several parts leaving one block (fingers, toes, horns...): split the block's
-  face first (`subd.insert_loop`) and extrude every other face, keeping a face between two
-  parts. Extruding neighbouring faces, or parts meeting at one vertex, makes poles with 6
-  edges or more, which subdivision pinches.
-* **Wide bases.** A part with a wide base comes from several faces extruded together
-  (`subd.extrude` takes a region), not from one face: one face makes a thin stalk.
-* **Thin parts.** A thin, flat part (a flap, a fin, a fold lying on the body) needs vertices
-  in the middle of its width to follow a curved surface: with only its 4 corners across, it
-  stays flat and subdivision shrinks it further, into the body it lies on.
+  face first and extrude every other face, each part on its own, keeping a face between two
+  parts. Extruding neighboring faces as separate parts, or parts meeting at one vertex,
+  makes poles with 6 edges or more, which subdivision pinches. `subd.insert_loop` cuts the
+  whole edge ring, not only that face: the new loops also run along the rest of the ring
+  (e.g. up the limb). Check it with `subd.edge_ring` first and cut where the ring stays
+  short or where the extra loops help.
+* **Wide bases.** One part with a wide base comes from several neighboring faces extruded
+  together as one region (`subd.extrude` takes a region), not from one face: one face
+  makes a thin stalk.
+* **Thin parts.** A thin, flat part (a flap, a fin, a fold lying on the body) needs at least
+  one loop along the middle of its width, more where it curves strongly: with only its 2
+  edges across the width (4 corners in cross-section), it stays flat and subdivision
+  shrinks it further, into the body it lies on.
 * **Write back.** Changes to a `bmesh.new()` copy only apply after `bm.to_mesh(mesh)`
   (in Edit Mode: `bmesh.update_edit_mesh(mesh)`), `subd.edit_mesh` does it for you.
 * **Imports.** Code run by `execute_blender_code` starts with nothing imported:
@@ -218,8 +230,8 @@ if tried.users == 0:
 
 ## Checking
 
-* `get_mesh_topology_summary` after each step: one entry in `islands` (parts overlapping the
-  body instead of extruded from it show up as more, see *Approach*), no `boundary_edges`
+* `get_mesh_topology_summary` after each step: one entry in `islands` (parts not joined to
+  the body, overlapping it or apart, show up as more, see *Approach*), no `boundary_edges`
   (holes), `non_manifold_edges`, `wire_edges`, `loose_vertices` or
   `inconsistent_normal_edges`, no triangles or n-gons,
   no `off_center_vertices` or `crossing_faces`, and no `warnings`.
