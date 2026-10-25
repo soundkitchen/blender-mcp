@@ -235,8 +235,8 @@ if tried.users == 0:
   (holes), `non_manifold_edges`, `wire_edges`, `loose_vertices` or
   `inconsistent_normal_edges`, no triangles or n-gons,
   no `off_center_vertices` or `crossing_faces`, and no `warnings`. A separate object for
-  a pair of parts (e.g. eyes), mirrored without merging and with nothing on the plane, has
-  no seam: its `symmetry` shows `is_separate_copy` and skips the seam checks.
+  a pair of parts (e.g. eyes), closed and mirrored without merging, with nothing on the
+  plane, has no seam: its `symmetry` shows `is_separate_copy` and skips the seam checks.
 * Expected poles in this (human) layout: 5 edges where the legs, arms and neck leave the torso and
   in front of the ankle (8), 3 edges at the corners of the head top, hand tip, toe tip and
   heel back (12). Poles elsewhere, or with 6 or more edges, point to a modeling mistake.

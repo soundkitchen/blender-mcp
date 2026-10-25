@@ -1438,10 +1438,30 @@ class _TestServerMixin:
                 for v in bm.verts:  # type: ignore[attr-defined]
                     v.co.x += 0.052
             obj = add("PairPart", part)
+            # Even after the Subdivision: without a seam, the order doesn't matter.
+            obj.modifiers.new("Subdivision", 'SUBSURF')  # type: ignore[attr-defined]
             mirror = obj.modifiers.new("Mirror", 'MIRROR')  # type: ignore[attr-defined]
             mirror.use_mirror_merge = False
             mirror.use_clip = False
-            obj.modifiers.new("Subdivision", 'SUBSURF')  # type: ignore[attr-defined]
+
+            # Not separate copies: a cube across the plane, a half cage with its seam 1 mm
+            # off the plane (open), an empty mesh.
+            def across(bm: object) -> None:
+                bmesh.ops.create_cube(bm, size=1.0)
+
+            def shifted(bm: object) -> None:
+                half(bm)
+                for v in bm.verts:  # type: ignore[attr-defined]
+                    v.co.x += 0.001
+
+            def empty(bm: object) -> None:
+                pass
+
+            for name, build in (("Across", across), ("ShiftedSeam", shifted), ("Empty", empty)):
+                obj = add(name, build)
+                mirror = obj.modifiers.new("Mirror", 'MIRROR')  # type: ignore[attr-defined]
+                mirror.use_mirror_merge = False
+                mirror.use_clip = False
             result = {'ok': True}  # noqa: F841
         self._test_tool("execute_blender_code", {
             "code": _python_fn_body_as_string(code),
@@ -1479,6 +1499,15 @@ class _TestServerMixin:
         self.assertEqual(symmetry["vertices_positive_side"], 8)
         self.assertEqual(symmetry["off_center_vertices"]["count"], 0)
         self.assertEqual(data["warnings"], [])
+
+        for name in ("Across", "ShiftedSeam", "Empty"):
+            data = self._test_tool("get_mesh_topology_summary", {"name": name})
+            self.assertEqual(data["status"], "ok", name)
+            self.assertFalse(data["symmetry"][0]["is_separate_copy"], name)
+            self.assertIn("Mirror 'Mirror' has merge disabled: the mirror seam stays open", data["warnings"], name)
+        # The shifted seam is reported: its vertices are close to the plane.
+        data = self._test_tool("get_mesh_topology_summary", {"name": "ShiftedSeam"})
+        self.assertEqual(data["symmetry"][0]["off_center_vertices"]["count"], 4)
 
     def test_get_mesh_topology_summary_enabled_modifiers(self) -> None:
         def code() -> None:
