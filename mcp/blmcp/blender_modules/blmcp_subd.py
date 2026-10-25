@@ -335,24 +335,42 @@ def bridge_loops(bm: _BMesh, loop_a: Sequence[_BMVert], loop_b: Sequence[_BMVert
     return faces
 
 
-def setup_mirror_subsurf(obj: _Object, levels: int = 2) -> dict[str, Any]:
+def setup_mirror_subsurf(
+        obj: _Object,
+        levels: int = 2,
+        merge_threshold: float | None = None,
+) -> dict[str, Any]:
     """
     Set up the modifiers of a half cage: Mirror on ``X`` (merge and clipping) then Subdivision Surface.
 
     Existing modifiers are reused (the first Mirror without a mirror object and the first
     Subdivision Surface), created when missing and moved so Mirror comes before Subdivision
     Surface. The ``Y`` and ``Z`` axes of a reused Mirror and other modifiers are left as they are.
-    Return the names of the modifiers, in their final order.
+
+    The Mirror's merge distance is *merge_threshold* when given. Otherwise a new Mirror, or one
+    still at Blender's default (1 mm), gets 1/1000 of the mirrored cage's largest size, at most
+    1 mm: a small model (e.g. a 17 cm bird) needs a smaller one, or vertices close to the plane
+    are merged. Other values set on a reused Mirror are kept. Sizes are in the object's local
+    units. Build the cage first. Return the names of the modifiers, in their final order, and
+    the merge distance.
     """
     if obj.type != 'MESH':
         raise TypeError("Object {!r} is a {:s}, not a mesh".format(obj.name, obj.type))
+    if merge_threshold is not None and not merge_threshold > 0.0:  # Also NaN.
+        raise ValueError("merge_threshold must be more than 0, not {!r}".format(merge_threshold))
     mods = obj.modifiers
     mirror = next((m for m in mods if m.type == 'MIRROR' and m.mirror_object is None), None)
+    is_new = mirror is None
     if mirror is None:
         mirror = mods.new("Mirror", 'MIRROR')  # Only `X` is enabled for a new one.
     mirror.use_axis[0] = True
     mirror.use_mirror_merge = True
     mirror.use_clip = True
+    # The default is stored as a 32-bit float: compare loosely.
+    if merge_threshold is None and (is_new or math.isclose(mirror.merge_threshold, _DISTANCE_MAX, rel_tol=1e-6)):
+        merge_threshold = _scaled_distance(_mesh_coords(obj.data), tuple(mirror.use_axis))
+    if merge_threshold is not None:
+        mirror.merge_threshold = merge_threshold
     subsurf = next((m for m in mods if m.type == 'SUBSURF'), None)
     if subsurf is None:
         subsurf = mods.new("Subdivision", 'SUBSURF')
@@ -361,7 +379,39 @@ def setup_mirror_subsurf(obj: _Object, levels: int = 2) -> dict[str, Any]:
     subsurf_index = mods.find(subsurf.name)
     if mirror_index > subsurf_index:
         mods.move(mirror_index, subsurf_index)
-    return {"modifiers": [m.name for m in mods], "mirror": mirror.name, "subdivision": subsurf.name}
+    return {
+        "modifiers": [m.name for m in mods],
+        "mirror": mirror.name,
+        "subdivision": subsurf.name,
+        "merge_threshold": mirror.merge_threshold,
+    }
+
+
+# Distances for merging (and snapping) vertices on a mirror plane: relative to the model's
+# size, at most Blender's default merge distance.
+_DISTANCE_FACTOR = 0.001
+_DISTANCE_MAX = 0.001
+
+
+def _mesh_coords(mesh: Any) -> list[Vector]:
+    verts = bmesh.from_edit_mesh(mesh).verts if mesh.is_editmode else mesh.vertices
+    return [v.co for v in verts]
+
+
+def _scaled_distance(coords: Iterable[Vector], mirrored: Sequence[bool] = (False, False, False)) -> float:
+    # A distance for a model with these vertices: the largest size of its axes, the
+    # `mirrored` ones with their mirrored copy (the plane at 0).
+    low = [math.inf] * 3
+    high = [-math.inf] * 3
+    for co in coords:
+        for axis in range(3):
+            c = abs(co[axis]) if mirrored[axis] else co[axis]
+            low[axis] = min(low[axis], -c if mirrored[axis] else c)
+            high[axis] = max(high[axis], c)
+    size = max((hi - lo for lo, hi in zip(low, high) if hi >= lo), default=0.0)
+    if size <= 0.0:
+        return _DISTANCE_MAX
+    return float(min(_DISTANCE_MAX, size * _DISTANCE_FACTOR))
 
 
 def scale_loop(
@@ -517,20 +567,24 @@ def set_crease(bm: _BMesh, edges: Iterable[_BMEdge], value: float) -> None:
         e[layer] = value
 
 
-def make_half(bm: _BMesh, tolerance: float = 0.001) -> dict[str, int]:
+def make_half(bm: _BMesh, tolerance: float | None = None) -> dict[str, Any]:
     """
     Make the right half cage of a whole mesh: cut it at ``X = 0`` and remove the ``-X`` side.
 
     For a mesh built without a Mirror modifier (e.g. converted from a Skin modifier), before
     :func:`setup_mirror_subsurf`. Vertices within *tolerance* of the plane are moved onto it
-    and faces left on the plane are removed, so the cage is open there. On a half cage, it
+    and faces left on the plane are removed, so the cage is open there. *tolerance* defaults
+    to 1/1000 of the mesh's largest size, at most 1 mm (local units). On a half cage, it
     also moves the vertices just off the plane (``off_center_vertices`` of
     ``get_mesh_topology_summary``, with a large enough *tolerance*) back onto it.
     Return the number of the mesh's vertices removed (``removed_vertices``) and moved onto
-    the plane (``snapped_vertices``), not counting the vertices made by the cut.
+    the plane (``snapped_vertices``), not counting the vertices made by the cut, and the
+    ``tolerance`` used.
     Edges without faces (wire edges) on the ``+X`` side are kept.
     The indices and lookup tables of *bm* are updated.
     """
+    if tolerance is None:
+        tolerance = _scaled_distance(v.co for v in bm.verts)
     original = set(bm.verts)
     wire = {e for e in bm.edges if not e.link_faces}
     bmesh.ops.bisect_plane(
@@ -551,22 +605,25 @@ def make_half(bm: _BMesh, tolerance: float = 0.001) -> dict[str, int]:
     bmesh.ops.delete(bm, geom=cut_wire, context='EDGES')
     _update_indices(bm)
     removed = sum(1 for v in original if not v.is_valid)
-    return {"removed_vertices": removed, "snapped_vertices": snapped}
+    return {"removed_vertices": removed, "snapped_vertices": snapped, "tolerance": tolerance}
 
 
-def symmetrize(bm: _BMesh, source: str = '+X', tolerance: float = 0.001) -> None:
+def symmetrize(bm: _BMesh, source: str = '+X', tolerance: float | None = None) -> None:
     """
     Make a whole mesh symmetric by copying its *source* side (``'+X'``, ``'-X'``, ``'+Y'``, ...)
     onto the other side.
 
     For a mesh without a Mirror modifier: the other side is replaced, faces crossing the
-    plane are cut. Vertices within *tolerance* of the plane are merged with their copy.
+    plane are cut. Vertices within *tolerance* of the plane are merged with their copy,
+    by default 1/1000 of the mesh's largest size, at most 1 mm (local units).
     For a half cage under a Mirror modifier, use :func:`make_half` instead.
     The indices and lookup tables of *bm* are updated.
     """
     directions = {'+X': 'X', '-X': '-X', '+Y': 'Y', '-Y': '-Y', '+Z': 'Z', '-Z': '-Z'}
     if source not in directions:
         raise ValueError("source must be one of {:s}, not {!r}".format(", ".join(directions), source))
+    if tolerance is None:
+        tolerance = _scaled_distance(v.co for v in bm.verts)
     bmesh.ops.symmetrize(
         bm, input=bm.verts[:] + bm.edges[:] + bm.faces[:], direction=directions[source], dist=tolerance,
         use_shapekey=True,

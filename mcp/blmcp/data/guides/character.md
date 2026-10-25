@@ -88,13 +88,22 @@ the selection or the mode:
   doesn't follow. Include the whole part beyond the moved vertices (e.g. the hand when
   lowering the wrist): otherwise it only follows partly and bends at the moved vertices.
 * `subd.set_crease(bm, edges, value)`: subdivision crease, from 0 (smooth) to 1 (sharp edge).
-* `subd.make_half(bm, tolerance=0.001)`: cuts a whole mesh at `X = 0` into a half cage (open
-  on the plane), moving the vertices within `tolerance` onto it. Also fixes
-  `off_center_vertices` of a half cage, with a `tolerance` above their distance.
+* `subd.make_half(bm, tolerance=None)`: cuts a whole mesh at `X = 0` into a half cage (open
+  on the plane), moving the vertices within `tolerance` onto it (by default, from the mesh's
+  size as below). Also fixes `off_center_vertices` of a half cage, with a `tolerance` above
+  their distance.
 * `subd.symmetrize(bm, source='+X')`: copies one side of a whole mesh (without a Mirror
   modifier) onto the other.
-* `subd.setup_mirror_subsurf(obj, levels=2)`: the Mirror (merge, clipping) then Subdivision
-  Surface modifiers, reusing and reordering existing ones.
+* `subd.setup_mirror_subsurf(obj, levels=2, merge_threshold=None)`: the Mirror (merge,
+  clipping) then Subdivision Surface modifiers, reusing and reordering existing ones, and
+  returns the `merge_threshold` used. Pass `merge_threshold` to set the merge distance.
+  Otherwise call it once the cage is built: a new Mirror's merge distance follows the cage's
+  size, 1/1000 of it, at most 1 mm (1 mm for a human, 0.17 mm for a 17 cm bird, in the
+  object's local units). A value you set on an existing Mirror is kept. Then check
+  `off_center_vertices`: vertices just off the plane, no longer merged with a smaller
+  distance, leave the seam open. Move them onto it with `make_half`, passing a `tolerance`
+  above the largest of their distances (its default, as small as the merge distance,
+  leaves them, and removes those on the `-X` side).
 
 `scale_loop` and `move_smooth` keep the vertices on the mirror plane on it, for a half cage
 under a Mirror modifier: pass `mirror=False` for a whole mesh (e.g. after `symmetrize`).
@@ -157,7 +166,7 @@ if tried.users == 0:
 8. **Compare with the references**, item by item (see *References*), and fix what differs.
 9. **Ground contact.** Subdivision shrinks the shape: check the lowest point after modifiers
    (`bounds_world` of `get_object_geometry_summary`) and move the cage so it touches the
-   ground, see *Ground contact* below. Check it again after changing the shape.
+   ground or its support, see *Ground contact* below. Check it again after changing the shape.
 
 ## Pitfalls
 
@@ -172,6 +181,10 @@ if tried.users == 0:
 * **Stale lookup tables.** After creating or deleting elements, `bm.verts[i]` raises until
   `bm.verts.ensure_lookup_table()` is called again (the `subd` helpers do it). Resolve the
   vertices you need into variables before running operators.
+* **New attribute layers.** Adding a layer to a `bmesh` (e.g. `bm.verts.layers.float.new()`,
+  a color or a crease) makes the references to those elements held before it stale: they no
+  longer match, e.g. as dictionary keys (`KeyError: <BMVert(...)>`). Add layers first, or
+  keep indices and look the elements up again (`subd.edit_mesh` adds the crease layer first).
 * **Write back.** Changes to a `bmesh.new()` copy only apply after `bm.to_mesh(mesh)`
   (in Edit Mode: `bmesh.update_edit_mesh(mesh)`), `subd.edit_mesh` does it for you.
 * **Imports.** Code run by `execute_blender_code` starts with nothing imported:
@@ -203,6 +216,10 @@ in Edit Mode, leaving it writes the edit-mesh back over these changes.
 The cage usually moves down by the shrinkage (`moved_by` is negative, a few millimeters
 for the example), so its sole ends up below the origin: expected, the subdivided result
 is what touches the ground.
+
+A subject that doesn't stand on the ground (e.g. a bird on a perch, a figure on a seat)
+rests on its support instead: fit the support to the parts touching it (the toes wrapped
+around the perch, measured after modifiers), rather than moving the cage to `Z = 0`.
 
 <!-- example: ground-contact -->
 ```python
