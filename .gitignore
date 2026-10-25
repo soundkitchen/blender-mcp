@@ -4,3 +4,5 @@ __pycache__/
 build/
 *.mcpb
 .mcp.json
+# Local verification files (e.g. .blend scenes kept for comparison).
+/tmp/
