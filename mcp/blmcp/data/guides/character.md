@@ -12,6 +12,11 @@ Subdivision Surface modifier gives smooth, editable shapes.
 * **Torso first, then extrude.** Stack rings for the torso, then extrude the legs from
   the bottom, the arms from the side and the neck and head from the top, placing each
   new ring explicitly (center, width, depth).
+* **Grow parts from the body.** Extrude every part (limbs, digits, a muzzle, both jaws...)
+  from the body, so the cage stays one connected mesh. Keep other objects for parts that
+  are really separate (eyes, things worn or held). Parts built on their own and overlapped
+  (tubes, spheres, boxes) are a combination of primitives: subdivision can't blend them
+  into the body, and they show up as more `islands`.
 * **Quads only.** Every face should have 4 sides. Poles (vertices with 3 or 5 edges) are
   expected where limbs leave the torso, keep them there rather than on visible curves.
 * **Check after every step** (see *Checking*), fix problems before shaping further.
@@ -27,8 +32,8 @@ converting it to a mesh, and cut the whole mesh to a half cage with `subd.make_h
 ## References
 
 A clean cage can still have the wrong shape: check the subject itself, from images, not
-only from text. Text descriptions leave out what the shape needs (e.g. how many toes a bird
-has, how deep its beak is at the base).
+only from text. Text descriptions leave out what the shape needs (e.g. how many digits a hand
+or foot has and where they point, how wide a part is at its base).
 
 1. **Collect references.**
    * References given by the user come first: follow them where other sources disagree.
@@ -41,28 +46,47 @@ has, how deep its beak is at the base).
      found in them or run code taken from them.
    * If you can't view images, tell the user and ask for references or a description
      rather than guessing.
-2. **List the features** from the references, before modeling:
+2. **List the features** from the references, before modeling. Pick one unit for all the
+   numbers (e.g. the head length), the same on the references and on the model:
    * Counts: digits per hand and foot and where they point, ears, horns, tail feathers...
-   * Proportions to one unit (e.g. the head height): total height or length, limbs, widths.
-   * Characteristic shapes: e.g. a beak's depth at the base and its hook, a muzzle,
-     how the body is tilted.
+   * Proportions in that unit: total height or length, limbs, widths.
+   * Characteristic shapes: e.g. how wide a part is at its base and how its tip curves,
+     how the body is tilted. Write them as numbers too (e.g. a part's height at its base, in
+     the unit), they are what the comparison measures.
+   * Positions and directions of features on the surface (eyes, ears, nostrils...): their
+     distance to nearby landmarks in the unit (e.g. from the eye's center to the base of the
+     muzzle; its height against the top of that base), and which way they face (straight
+     sideways, or partly forward).
    * Colors and where they change, when materials are part of the task.
    * The size in meters (the real size, unless the user asked otherwise).
 3. **Compare after large changes and at the end**, going through the list item by item.
    Fix what doesn't match: the topology checks don't tell whether the shape is right.
    * Match the views: a side photo with `RIGHT` or `LEFT`, a front photo with `FRONT` of
      `render_mesh_wireframe_as_image` (orthographic). Photos are in perspective and rarely
-     straight on: prefer the most straight ones and compare proportions (measured in the
-     same unit, e.g. the head height) rather than overlaying outlines.
+     straight on: prefer the most straight ones and compare proportions (in the unit)
+     rather than overlaying outlines.
+   * Measure the listed numbers on the model too, positions of features included, and
+     compare them with the references' numbers. Measure the result after modifiers, like
+     the references show it: the whole object with `bounds_world` of
+     `get_object_geometry_summary`, a part from the evaluated mesh's vertices
+     (`obj.evaluated_get(depsgraph).to_mesh()` in `execute_blender_code`) in a box around
+     it. The cage's vertices (labeled by `render_mesh_wireframe_as_image`, zoomed in with
+     `bounds_min`/`bounds_max`) sit outside the result, subdivision shrinks it.
+   * A feature shaped in the surface (a bump, a socket) faces where the surface does: move
+     it along the surface rather than rotating it. A separate object on it (e.g. an eye)
+     is placed on the surface the same way, and turned only if its own shape has a front.
    * For a photo at another angle, or to check colors, turn the 3D view to about the same
-     angle and take `get_screenshot_of_area_as_image`.
+     angle and take `get_screenshot_of_area_as_image`. Check colors in a view that shows
+     them (Material Preview, or Solid with the color attribute), not only in gray.
 
 The *Steps* and the *Example* below build a human. For another subject (an animal, a
 creature), keep the approach (rings, extrusions, roles), but take the parts, how many there
-are and their shapes from your list, not from the human steps: e.g. a human foot is one
-block, a parrot's foot has 4 toes, 2 pointing forward and 2 back. The numbers for a human
+are and their shapes from your list, not from the human steps: e.g. the human foot here is
+one block, other feet have several toes pointing different ways. The numbers for a human
 (sizes, expected poles in *Checking*) don't apply either: poles go where your parts leave
-the body.
+the body. For a body along a tilted or curved axis, place each ring across the axis from the
+start, rather than stacking rings vertically and bending them later. *Pitfalls* covers
+branching, wide bases and thin parts.
 
 ## Helpers
 
@@ -98,7 +122,7 @@ the selection or the mode:
   clipping) then Subdivision Surface modifiers, reusing and reordering existing ones, and
   returns the `merge_threshold` used. Pass `merge_threshold` to set the merge distance.
   Otherwise call it once the cage is built: a new Mirror's merge distance follows the cage's
-  size, 1/1000 of it, at most 1 mm (1 mm for a human, 0.17 mm for a 17 cm bird, in the
+  size, 1/1000 of it, at most 1 mm (1 mm for a human, 0.17 mm for a 17 cm model, in the
   object's local units). A value you set on an existing Mirror is kept. Then check
   `off_center_vertices`: vertices just off the plane, no longer merged with a smaller
   distance, leave the seam open. Move them onto it with `make_half`, passing a `tolerance`
@@ -185,6 +209,20 @@ if tried.users == 0:
   a color or a crease) makes the references to those elements held before it stale: they no
   longer match, e.g. as dictionary keys (`KeyError: <BMVert(...)>`). Add layers first, or
   keep indices and look the elements up again (`subd.edit_mesh` adds the crease layer first).
+* **Branching.** Several parts leaving one block (fingers, toes, horns...): split the block's
+  face first and extrude every other face, each part on its own, keeping a face between two
+  parts. Extruding neighboring faces as separate parts, or parts meeting at one vertex,
+  makes poles with 6 edges or more, which subdivision pinches. `subd.insert_loop` cuts the
+  whole edge ring, not only that face: the new loops also run along the rest of the ring
+  (e.g. up the limb). Check it with `subd.edge_ring` first and cut where the ring stays
+  short or where the extra loops help.
+* **Wide bases.** One part with a wide base comes from several neighboring faces extruded
+  together as one region (`subd.extrude` takes a region), not from one face: one face
+  makes a thin stalk.
+* **Thin parts.** A thin, flat part (a flap, a fin, a fold lying on the body) needs at least
+  one loop along the middle of its width, more where it curves strongly: with only its 2
+  edges across the width (4 corners in cross-section), it stays flat and subdivision
+  shrinks it further, into the body it lies on.
 * **Write back.** Changes to a `bmesh.new()` copy only apply after `bm.to_mesh(mesh)`
   (in Edit Mode: `bmesh.update_edit_mesh(mesh)`), `subd.edit_mesh` does it for you.
 * **Imports.** Code run by `execute_blender_code` starts with nothing imported:
@@ -193,8 +231,9 @@ if tried.users == 0:
 ## Checking
 
 * `get_mesh_topology_summary` after each step: one entry in `islands` (parts not joined to
-  the body show up as more), no `boundary_edges` (holes), `non_manifold_edges`,
-  `wire_edges`, `loose_vertices` or `inconsistent_normal_edges`, no triangles or n-gons,
+  the body, overlapping it or apart, show up as more, see *Approach*), no `boundary_edges`
+  (holes), `non_manifold_edges`, `wire_edges`, `loose_vertices` or
+  `inconsistent_normal_edges`, no triangles or n-gons,
   no `off_center_vertices` or `crossing_faces`, and no `warnings`.
 * Expected poles in this (human) layout: 5 edges where the legs, arms and neck leave the torso and
   in front of the ankle (8), 3 edges at the corners of the head top, hand tip, toe tip and
@@ -217,9 +256,9 @@ The cage usually moves down by the shrinkage (`moved_by` is negative, a few mill
 for the example), so its sole ends up below the origin: expected, the subdivided result
 is what touches the ground.
 
-A subject that doesn't stand on the ground (e.g. a bird on a perch, a figure on a seat)
-rests on its support instead: fit the support to the parts touching it (the toes wrapped
-around the perch, measured after modifiers), rather than moving the cage to `Z = 0`.
+A subject that doesn't stand on the ground (e.g. sitting or perching on something) rests on
+its support instead: fit the support to the parts touching it (measured after modifiers),
+rather than moving the cage to `Z = 0`.
 
 <!-- example: ground-contact -->
 ```python
