@@ -219,6 +219,31 @@ def _is_edge_joined(e: _BMEdge, planes: list[_Plane]) -> bool:
     return any(plane.is_joined and _is_edge_on_plane(e, plane) for plane in planes)
 
 
+def _is_separate_copy(bm: _BMesh, plane: _Plane) -> bool:
+    """
+    Return whether the Mirror of *plane* only adds a separate copy of the mesh (e.g. one of a pair).
+
+    It doesn't merge, and the mesh has nothing on the plane, is on one side of it and is closed:
+    a half cage is open along its seam, even when the seam is off the plane.
+    """
+    if plane.modifier.use_mirror_merge or not bm.verts:
+        return False
+    axis = plane.axis
+    if any(_is_on_plane(v, plane) for v in bm.verts):
+        return False
+    if any(v.co[axis] > 0.0 for v in bm.verts) and any(v.co[axis] < 0.0 for v in bm.verts):
+        return False
+    return not any(e.is_boundary for e in bm.edges)
+
+
+def _separate_copies(bm: _BMesh, planes: list[_Plane]) -> set[str]:
+    """
+    Return the names of the Mirror modifiers that only add a separate copy, on all their axes.
+    """
+    separate = {plane.modifier.name for plane in planes if _is_separate_copy(bm, plane)}
+    return separate - {plane.modifier.name for plane in planes if not _is_separate_copy(bm, plane)}
+
+
 def _symmetry_info(bm: _BMesh, plane: _Plane, items: _Items) -> dict[str, Any]:
     """
     Check the cage against the mirror *plane*.
@@ -229,7 +254,10 @@ def _symmetry_info(bm: _BMesh, plane: _Plane, items: _Items) -> dict[str, Any]:
     size = (max(coords) - min(coords)) if coords else 0.0
     near = max(tolerance * 10.0, size * _SYMMETRY_NEAR_FACTOR)
 
-    off_center = [v for v in bm.verts if tolerance < abs(v.co[axis]) <= near]
+    on_plane = sum(1 for v in bm.verts if _is_on_plane(v, plane))
+    # A separate copy has no seam: vertices close to the plane are not off it.
+    is_separate_copy = _is_separate_copy(bm, plane)
+    off_center = [] if is_separate_copy else [v for v in bm.verts if tolerance < abs(v.co[axis]) <= near]
     positive = sum(1 for c in coords if c > tolerance)
     negative = sum(1 for c in coords if c < -tolerance)
     # Faces with vertices on both sides overlap their mirrored copy.
@@ -242,7 +270,9 @@ def _symmetry_info(bm: _BMesh, plane: _Plane, items: _Items) -> dict[str, Any]:
         "modifier": plane.modifier.name,
         "tolerance": _round(tolerance, 7),
         "is_joined": plane.is_joined,
+        "is_separate_copy": is_separate_copy,
         "use_clip": plane.modifier.use_clip,
+        "vertices_on_plane": on_plane,
         "vertices_positive_side": positive,
         "vertices_negative_side": negative,
         "off_center_vertices": _listing(off_center, items.vert),
@@ -280,15 +310,18 @@ def _modifier_info(index: int, mod: _Modifier) -> dict[str, Any]:
     return info
 
 
-def _modifier_warnings(obj: _Object) -> list[str]:
+def _modifier_warnings(obj: _Object, separate_copies: set[str]) -> list[str]:
     """
     Return problems in the stack of enabled modifiers.
+
+    Mirror modifiers in *separate_copies* only add a separate copy, without a seam:
+    their order, merge and clipping settings don't matter.
     """
     modifiers = _enabled_modifiers(obj)
     subdivision_index = _first_subdivision_index(modifiers)
     warnings = []
     for index, mod in enumerate(modifiers):
-        if mod.type != 'MIRROR':
+        if mod.type != 'MIRROR' or mod.name in separate_copies:
             continue
         if index > subdivision_index:
             warnings.append(
@@ -510,12 +543,15 @@ def main(params: Params) -> Result:
     if is_edit_mode:
         # Read the edit-mesh so unsynced edits are included, it's only read, never modified.
         # NOTE: `BMesh.copy` is avoided as it renumbers the elements of the source.
-        info = _topology(obj, bmesh.from_edit_mesh(mesh), is_edit_mode)
+        bm = bmesh.from_edit_mesh(mesh)
+        info = _topology(obj, bm, is_edit_mode)
+        separate_copies = _separate_copies(bm, _mirror_planes(obj))
     else:
         bm = bmesh.new()
         try:
             bm.from_mesh(mesh)
             info = _topology(obj, bm, is_edit_mode)
+            separate_copies = _separate_copies(bm, _mirror_planes(obj))
         finally:
             bm.free()
 
@@ -524,6 +560,6 @@ def main(params: Params) -> Result:
         name=obj.name,
         is_edit_mode=is_edit_mode,
         modifiers=[_modifier_info(index, mod) for index, mod in enumerate(obj.modifiers)],
-        warnings=_modifier_warnings(obj),
+        warnings=_modifier_warnings(obj, separate_copies),
         **info,
     )

@@ -69,9 +69,14 @@ def register(mcp: MCPServer) -> None:
         Mirror merges and comes before subdivision, welding the cage to its
         mirrored copy along the plane. ``off_center_vertices`` are close to
         the plane but not on it, ``crossing_faces`` have vertices on both
-        sides of the plane, and ``vertices_positive_side`` &
-        ``vertices_negative_side`` count the vertices on each side (all
-        should be on one side).
+        sides of the plane. ``vertices_on_plane``, ``vertices_positive_side``
+        & ``vertices_negative_side`` count the vertices on the plane and on
+        each side (they add up to all the vertices, all should be on the
+        plane or on one side). ``is_separate_copy`` is true for a Mirror
+        without merging of a closed mesh on one side, with no vertex on the
+        plane: a separate part (e.g. one of a pair), not a half cage (open
+        along its seam). It has no seam, so no off-center vertices and no
+        warnings about that Mirror.
         ``modifiers`` lists the modifier stack, with ``settings`` for
         Mirror, Subdivision Surface and Multiresolution.
         ``subdivision_size`` compares the object-space size of the cage
