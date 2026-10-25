@@ -52,6 +52,10 @@ or foot has and where they point, how wide a part is at its base).
    * Characteristic shapes: e.g. how wide a part is at its base and how its tip curves,
      how the body is tilted. Write them as numbers too (e.g. a part's height at its base
      divided by the head height), they are what the comparison measures.
+   * Positions and directions of features on the surface (eyes, ears, nostrils...): their
+     distance to nearby landmarks as numbers (e.g. from the eye's center to the base of the
+     muzzle, divided by the head length; its height against the top of that base), and which
+     way they face (straight sideways, or partly forward).
    * Colors and where they change, when materials are part of the task.
    * The size in meters (the real size, unless the user asked otherwise).
 3. **Compare after large changes and at the end**, going through the list item by item.
@@ -61,7 +65,9 @@ or foot has and where they point, how wide a part is at its base).
      straight on: prefer the most straight ones and compare proportions (measured in the
      same unit, e.g. the head height) rather than overlaying outlines.
    * Measure the listed numbers on the model too, zoomed in on each characteristic part
-     (`bounds_min`/`bounds_max`), and compare them with the references' numbers.
+     (`bounds_min`/`bounds_max`), and compare them with the references' numbers, positions
+     of features included. A feature placed on the surface faces where the surface does:
+     move it along the surface rather than rotating it.
    * For a photo at another angle, or to check colors, turn the 3D view to about the same
      angle and take `get_screenshot_of_area_as_image`. Check colors in a view that shows
      them (Material Preview, or Solid with the color attribute), not only in gray.
