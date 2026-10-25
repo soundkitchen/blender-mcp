@@ -1264,6 +1264,10 @@ class _TestServerMixin:
         self.assertAlmostEqual(symmetry["tolerance"], 0.0005, places=6)
         self.assertTrue(symmetry["is_joined"])
         self.assertTrue(symmetry["use_clip"])
+        self.assertFalse(symmetry["is_separate_copy"])
+        # 3 vertices on the plane, 4 at X=1 and the moved one: all the vertices.
+        self.assertEqual(symmetry["vertices_on_plane"], 3)
+        self.assertEqual(symmetry["vertices_positive_side"], 5)
         self.assertEqual(symmetry["vertices_negative_side"], 0)
         off_center = symmetry["off_center_vertices"]
         self.assertEqual(off_center["count"], 1)
@@ -1427,6 +1431,17 @@ class _TestServerMixin:
             mirror.use_mirror_merge = False
             mirror.use_clip = True
             obj.modifiers.new("Subdivision", 'SUBSURF')  # type: ignore[attr-defined]
+
+            # One of a pair of parts: a small cube 2 mm off the plane, mirrored as a separate copy.
+            def part(bm: object) -> None:
+                bmesh.ops.create_cube(bm, size=0.1)
+                for v in bm.verts:  # type: ignore[attr-defined]
+                    v.co.x += 0.052
+            obj = add("PairPart", part)
+            mirror = obj.modifiers.new("Mirror", 'MIRROR')  # type: ignore[attr-defined]
+            mirror.use_mirror_merge = False
+            mirror.use_clip = False
+            obj.modifiers.new("Subdivision", 'SUBSURF')  # type: ignore[attr-defined]
             result = {'ok': True}  # noqa: F841
         self._test_tool("execute_blender_code", {
             "code": _python_fn_body_as_string(code),
@@ -1451,6 +1466,19 @@ class _TestServerMixin:
         self.assertEqual(data["poles"]["valence_3"]["count"], 4)
         self.assertEqual(data["warnings"], ["Mirror 'Mirror' has merge disabled: the mirror seam stays open"])
         self.assertIsNone(data["subdivision_size"])
+        # With vertices on the plane, it's a seam left open, not a separate copy.
+        self.assertFalse(data["symmetry"][0]["is_separate_copy"])
+
+        # A separate copy: no seam, so vertices near the plane (2 mm) are not off-center,
+        # and merging and clipping don't matter.
+        data = self._test_tool("get_mesh_topology_summary", {"name": "PairPart"})
+        self.assertEqual(data["status"], "ok")
+        (symmetry,) = data["symmetry"]
+        self.assertTrue(symmetry["is_separate_copy"])
+        self.assertEqual(symmetry["vertices_on_plane"], 0)
+        self.assertEqual(symmetry["vertices_positive_side"], 8)
+        self.assertEqual(symmetry["off_center_vertices"]["count"], 0)
+        self.assertEqual(data["warnings"], [])
 
     def test_get_mesh_topology_summary_enabled_modifiers(self) -> None:
         def code() -> None:

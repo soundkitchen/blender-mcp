@@ -229,7 +229,11 @@ def _symmetry_info(bm: _BMesh, plane: _Plane, items: _Items) -> dict[str, Any]:
     size = (max(coords) - min(coords)) if coords else 0.0
     near = max(tolerance * 10.0, size * _SYMMETRY_NEAR_FACTOR)
 
-    off_center = [v for v in bm.verts if tolerance < abs(v.co[axis]) <= near]
+    on_plane = sum(1 for c in coords if abs(c) <= tolerance)
+    # Without merging and with nothing on the plane, the Mirror only adds a separate copy
+    # (e.g. a pair of parts): there is no seam, vertices close to the plane are not off it.
+    is_separate_copy = not plane.modifier.use_mirror_merge and on_plane == 0
+    off_center = [] if is_separate_copy else [v for v in bm.verts if tolerance < abs(v.co[axis]) <= near]
     positive = sum(1 for c in coords if c > tolerance)
     negative = sum(1 for c in coords if c < -tolerance)
     # Faces with vertices on both sides overlap their mirrored copy.
@@ -242,7 +246,9 @@ def _symmetry_info(bm: _BMesh, plane: _Plane, items: _Items) -> dict[str, Any]:
         "modifier": plane.modifier.name,
         "tolerance": _round(tolerance, 7),
         "is_joined": plane.is_joined,
+        "is_separate_copy": is_separate_copy,
         "use_clip": plane.modifier.use_clip,
+        "vertices_on_plane": on_plane,
         "vertices_positive_side": positive,
         "vertices_negative_side": negative,
         "off_center_vertices": _listing(off_center, items.vert),
@@ -280,9 +286,12 @@ def _modifier_info(index: int, mod: _Modifier) -> dict[str, Any]:
     return info
 
 
-def _modifier_warnings(obj: _Object) -> list[str]:
+def _modifier_warnings(obj: _Object, separate_copies: set[str]) -> list[str]:
     """
     Return problems in the stack of enabled modifiers.
+
+    Mirror modifiers in *separate_copies* only add a separate copy, without a seam:
+    their merge and clipping settings don't matter.
     """
     modifiers = _enabled_modifiers(obj)
     subdivision_index = _first_subdivision_index(modifiers)
@@ -295,6 +304,8 @@ def _modifier_warnings(obj: _Object) -> list[str]:
                 "Subdivision {!r} comes before Mirror {!r}: the mirror seam is not smoothed, "
                 "move the Mirror modifier above it".format(modifiers[subdivision_index].name, mod.name)
             )
+        if mod.name in separate_copies:
+            continue
         if not mod.use_mirror_merge:
             warnings.append(
                 "Mirror {!r} has merge disabled: the mirror seam stays open".format(mod.name)
@@ -519,11 +530,14 @@ def main(params: Params) -> Result:
         finally:
             bm.free()
 
+    # A Mirror is a separate copy when all its axes are.
+    separate_copies = {item["modifier"] for item in info["symmetry"] if item["is_separate_copy"]}
+    separate_copies -= {item["modifier"] for item in info["symmetry"] if not item["is_separate_copy"]}
     return Result(
         status="ok",
         name=obj.name,
         is_edit_mode=is_edit_mode,
         modifiers=[_modifier_info(index, mod) for index, mod in enumerate(obj.modifiers)],
-        warnings=_modifier_warnings(obj),
+        warnings=_modifier_warnings(obj, separate_copies),
         **info,
     )
