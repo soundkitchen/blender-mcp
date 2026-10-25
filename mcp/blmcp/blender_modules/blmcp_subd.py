@@ -49,6 +49,7 @@ from typing import Any, NamedTuple
 
 import bmesh  # pylint: disable=import-error
 from mathutils import Vector  # pylint: disable=import-error
+from mathutils.kdtree import KDTree  # pylint: disable=import-error
 
 # Placeholder types for Blender Python objects (no stubs available).
 _BMesh = Any
@@ -59,6 +60,10 @@ _Object = Any
 
 # Vertices closer than this to `X = 0` are on the mirror plane.
 _MIRROR_PLANE_TOLERANCE = 1e-6
+
+
+def _on_mirror_plane(v: _BMVert) -> bool:
+    return bool(abs(v.co.x) < _MIRROR_PLANE_TOLERANCE)
 
 
 @contextlib.contextmanager
@@ -170,7 +175,7 @@ def extrude(bm: _BMesh, faces: Iterable[_BMFace]) -> Extruded:
     bmesh.ops.delete(bm, geom=faces, context='FACES')
     new_face_set = set(new_faces)
     sides = {f for v in new_verts for f in v.link_faces if f not in new_face_set}
-    on_plane = [f for f in sides if all(abs(v.co.x) < _MIRROR_PLANE_TOLERANCE for v in f.verts)]
+    on_plane = [f for f in sides if all(_on_mirror_plane(v) for v in f.verts)]
     for f in on_plane:
         old_edges.update(f.edges)
     bmesh.ops.delete(bm, geom=on_plane, context='FACES_ONLY')
@@ -359,22 +364,20 @@ def setup_mirror_subsurf(obj: _Object, levels: int = 2) -> dict[str, Any]:
     return {"modifiers": [m.name for m in mods], "mirror": mirror.name, "subdivision": subsurf.name}
 
 
-def _on_mirror_plane(v: _BMVert) -> bool:
-    return bool(abs(v.co.x) < _MIRROR_PLANE_TOLERANCE)
-
-
 def scale_loop(
         verts: Iterable[_BMVert],
         scale: float | Sequence[float],
         center: Sequence[float] | None = None,
+        mirror: bool = True,
 ) -> tuple[float, float, float]:
     """
     Scale *verts* (e.g. a loop from :func:`insert_loop`) around *center*, per axis.
 
     *scale* is a factor or ``(x, y, z)`` factors. *center* defaults to the average of the
-    vertices. When some of them are on the mirror plane (the right half of a ring, e.g. a
-    waist loop), the center's ``X`` is 0 (the center of the whole ring) and the vertices
-    on the plane stay on it. Return the center used.
+    vertices. With *mirror* (for a half cage under a Mirror modifier), when some of them are
+    on the mirror plane (the right half of a ring, e.g. a waist loop), the center's ``X`` is 0
+    (the center of the whole ring) and the vertices on the plane stay on it. Pass
+    ``mirror=False`` for a whole mesh. Return the center used.
     """
     verts = list(verts)
     if not verts:
@@ -384,12 +387,12 @@ def scale_loop(
         raise ValueError("scale must be a number or 3 numbers (X, Y, Z)")
     if center is None:
         middle = sum((v.co for v in verts), Vector()) / len(verts)
-        if any(_on_mirror_plane(v) for v in verts):
+        if mirror and any(_on_mirror_plane(v) for v in verts):
             middle.x = 0.0
     else:
         middle = Vector(center)
     for v in verts:
-        on_plane = _on_mirror_plane(v)
+        on_plane = mirror and _on_mirror_plane(v)
         v.co = Vector(m + (c - m) * f for c, m, f in zip(v.co, middle, factors))
         if on_plane:
             v.co.x = 0.0
@@ -415,6 +418,7 @@ def move_smooth(
         radius: float,
         falloff: str = 'SMOOTH',
         connected: bool = True,
+        mirror: bool = True,
 ) -> dict[_BMVert, float]:
     """
     Move *verts* by *offset*, the vertices around them follow less and less up to *radius*.
@@ -425,7 +429,8 @@ def move_smooth(
     With *connected*, the distance is measured along the edges, so only vertices joined to
     the moved ones follow (e.g. moving an arm leaves the nearby torso in place). Otherwise
     it is the straight distance, any vertex in *radius* follows.
-    Vertices on the mirror plane stay on it. Return the weight of each vertex that moved.
+    With *mirror* (for a half cage under a Mirror modifier), vertices on the mirror plane stay
+    on it, pass ``mirror=False`` for a whole mesh. Return the weight of each vertex that moved.
     """
     verts = list(verts)
     if not verts:
@@ -440,7 +445,7 @@ def move_smooth(
     for v, d in distances.items():
         weights[v] = 1.0 if d == 0.0 else _FALLOFFS[falloff](1.0 - d / radius)
     for v, w in weights.items():
-        on_plane = _on_mirror_plane(v)
+        on_plane = mirror and _on_mirror_plane(v)
         v.co += move * w
         if on_plane:
             v.co.x = 0.0
@@ -469,10 +474,14 @@ def _distances_along_edges(verts: list[_BMVert], radius: float) -> dict[_BMVert,
 def _distances_straight(bm: _BMesh, verts: list[_BMVert], radius: float) -> dict[_BMVert, float]:
     # Straight distances to the nearest of `verts`, below `radius`.
     distances = {v: 0.0 for v in verts}
+    tree = KDTree(len(verts))
+    for i, u in enumerate(verts):
+        tree.insert(u.co, i)
+    tree.balance()
     for v in bm.verts:
         if v in distances:
             continue
-        d = min((v.co - u.co).length for u in verts)
+        _co, _index, d = tree.find(v.co)
         if d < radius:
             distances[v] = d
     return distances
@@ -517,10 +526,13 @@ def make_half(bm: _BMesh, tolerance: float = 0.001) -> dict[str, int]:
     and faces left on the plane are removed, so the cage is open there. On a half cage, it
     also moves the vertices just off the plane (``off_center_vertices`` of
     ``get_mesh_topology_summary``, with a large enough *tolerance*) back onto it.
-    Return the number of ``removed_vertices`` and ``snapped_vertices``.
+    Return the number of the mesh's vertices removed (``removed_vertices``) and moved onto
+    the plane (``snapped_vertices``), not counting the vertices made by the cut.
+    Edges without faces (wire edges) on the ``+X`` side are kept.
     The indices and lookup tables of *bm* are updated.
     """
-    count = len(bm.verts)
+    original = set(bm.verts)
+    wire = {e for e in bm.edges if not e.link_faces}
     bmesh.ops.bisect_plane(
         bm, geom=bm.verts[:] + bm.edges[:] + bm.faces[:], dist=tolerance,
         plane_co=(0.0, 0.0, 0.0), plane_no=(1.0, 0.0, 0.0), clear_inner=True,
@@ -529,12 +541,17 @@ def make_half(bm: _BMesh, tolerance: float = 0.001) -> dict[str, int]:
     for v in bm.verts:
         if v.co.x != 0.0 and abs(v.co.x) <= tolerance:
             v.co.x = 0.0
-            snapped += 1
+            if v in original:
+                snapped += 1
     on_plane = [f for f in bm.faces if all(_on_mirror_plane(v) for v in f.verts)]
     bmesh.ops.delete(bm, geom=on_plane, context='FACES_ONLY')
-    bmesh.ops.delete(bm, geom=[e for e in bm.edges if not e.link_faces], context='EDGES')
+    # Only the edges left on the plane without faces, not the mesh's own wire edges.
+    cut_wire = [e for e in bm.edges
+                if not e.link_faces and e not in wire and all(_on_mirror_plane(v) for v in e.verts)]
+    bmesh.ops.delete(bm, geom=cut_wire, context='EDGES')
     _update_indices(bm)
-    return {"removed_vertices": max(0, count - len(bm.verts)), "snapped_vertices": snapped}
+    removed = sum(1 for v in original if not v.is_valid)
+    return {"removed_vertices": removed, "snapped_vertices": snapped}
 
 
 def symmetrize(bm: _BMesh, source: str = '+X', tolerance: float = 0.001) -> None:
@@ -552,5 +569,6 @@ def symmetrize(bm: _BMesh, source: str = '+X', tolerance: float = 0.001) -> None
         raise ValueError("source must be one of {:s}, not {!r}".format(", ".join(directions), source))
     bmesh.ops.symmetrize(
         bm, input=bm.verts[:] + bm.edges[:] + bm.faces[:], direction=directions[source], dist=tolerance,
+        use_shapekey=True,
     )
     _update_indices(bm)

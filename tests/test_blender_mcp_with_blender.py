@@ -1911,6 +1911,11 @@ class _TestServerMixin:
             result["half_ring_center"] = subd.scale_loop(rings[1], (2.0, 0.5, 1.0))
             result["half_ring"] = [tuple(v.co) for v in rings[1]]
             result["side_center"] = subd.scale_loop(rings[2][1:3], 2.0)
+            # Without `mirror` (a whole mesh), the vertices on X = 0 are like the others.
+            result["whole_center"] = subd.scale_loop(rings[0], (2.0, 1.0, 1.0), mirror=False)
+            result["whole_ring_x"] = [v.co.x for v in rings[0]]
+            weights = subd.move_smooth(bm, rings[2], (1.0, 0.0, 0.0), radius=0.5, mirror=False)
+            result["whole_moved_x"] = sorted(v.co.x for v in weights)
             bm.free()
 
             # move_smooth: along the edges only the tube follows, in a straight line also the
@@ -1964,6 +1969,20 @@ class _TestServerMixin:
                 "wire_edges": sum(1 for e in bm.edges if not e.link_faces),
             }
             bm.free()
+            # Cut through faces (3x3 per side, no vertices near X = 0): the vertices made by the
+            # cut are not counted. Wire edges of the mesh stay: one on +X, one across the plane.
+            bm = bmesh.new()
+            bmesh.ops.create_cube(bm, size=2.0)
+            bmesh.ops.subdivide_edges(bm, edges=bm.edges[:], cuts=2, use_grid_fill=True)
+            bm.edges.new((bm.verts.new((2.0, 0.0, 0.0)), bm.verts.new((3.0, 0.0, 0.0))))
+            bm.edges.new((bm.verts.new((-1.0, 5.0, 0.0)), bm.verts.new((1.0, 5.0, 0.0))))
+            result["make_half_cut"] = subd.make_half(bm)
+            result["half_cut"] = {
+                "min_x": min(v.co.x for v in bm.verts),
+                "wire_edges": sorted(
+                    sorted(round(v.co.x, 3) for v in e.verts) for e in bm.edges if not e.link_faces),
+            }
+            bm.free()
 
             # symmetrize: the +X side (wider) is copied onto the -X side.
             bm = bmesh.new()
@@ -1971,14 +1990,25 @@ class _TestServerMixin:
             for v in bm.verts:
                 if v.co.x > 0.0:
                     v.co.y *= 2.0
+            # A shape key (twice the basis on the +X side) is mirrored too (the vertices made
+            # by the cut at X = 0 get interpolated values, not checked).
+            key = bm.verts.layers.shape.new("Key")
+            for v in bm.verts:
+                v[key] = v.co * 2.0 if v.co.x > 0.0 else (0.0, 0.0, 0.0)
             subd.symmetrize(bm, '+X')
             result["symmetrize"] = sorted({(round(v.co.x, 3), round(abs(v.co.y), 3)) for v in bm.verts})
+            result["symmetrize_key"] = all(
+                (v[key] - v.co * 2.0).length < 1e-5 for v in bm.verts if abs(v.co.x) > 0.5)
             bm.free()
 
         data = self._test_tool("execute_blender_code", {"code": _python_fn_body_as_string(code)})
         self.assertEqual(data["half_ring_center"], [0.0, 0.0, 1.0])
         self.assertEqual(data["half_ring"], [[0.0, -0.5, 1.0], [2.0, -0.5, 1.0], [2.0, 0.5, 1.0], [0.0, 0.5, 1.0]])
         self.assertEqual(data["side_center"], [1.0, 0.0, 2.0])
+        self.assertEqual(data["whole_center"], [0.5, 0.0, 0.0])
+        self.assertEqual(data["whole_ring_x"], [-0.5, 1.5, 1.5, -0.5])
+        # All 4 vertices move by 1, including the 2 on X = 0.
+        self.assertEqual(data["whole_moved_x"], [1.0, 1.0, 2.0, 2.0])
         for key, other_follows in (("move_1", False), ("move_0", True)):
             move = data[key]
             self.assertEqual(move["moved_z"], 4.0, key)
@@ -1994,7 +2024,12 @@ class _TestServerMixin:
         self.assertEqual(data["half"]["sides"], [4])
         self.assertTrue(data["half"]["boundary_on_plane"])
         self.assertEqual(data["half"]["wire_edges"], 0)
+        # The -X side (16 + 12 vertices) and the -X end of the wire edge across the plane.
+        self.assertEqual(data["make_half_cut"], {"removed_vertices": 29, "snapped_vertices": 0})
+        self.assertEqual(data["half_cut"]["min_x"], 0.0)
+        self.assertEqual(data["half_cut"]["wire_edges"], [[0.0, 1.0], [2.0, 3.0]])
         self.assertEqual(data["symmetrize"], [[-1.0, 2.0], [0.0, 1.5], [1.0, 2.0]])
+        self.assertTrue(data["symmetrize_key"])
 
     def test_get_modeling_guide_character(self) -> None:
         """

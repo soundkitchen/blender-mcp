@@ -53,7 +53,8 @@ the selection or the mode:
 * `subd.setup_mirror_subsurf(obj, levels=2)`: the Mirror (merge, clipping) then Subdivision
   Surface modifiers, reusing and reordering existing ones.
 
-`scale_loop` and `move_smooth` keep the vertices on the mirror plane on it.
+`scale_loop` and `move_smooth` keep the vertices on the mirror plane on it, for a half cage
+under a Mirror modifier: pass `mirror=False` for a whole mesh (e.g. after `symmetrize`).
 
 Their docstrings (`help(subd.extrude)`) have the details. For example, to add a loop around
 the waist and widen it. Pick the edge by the indices of its two vertices, as shown by
@@ -82,12 +83,13 @@ positions by hand:
 
 ```python
 backup = obj.data.copy()  # Before the change, keep it until the result is checked.
-# Undo: put the copy back and remove the changed mesh.
+# Undo: put the copy back and remove the changed mesh, unless other objects use it.
 tried = obj.data
 name = tried.name
 obj.data = backup
-bpy.data.meshes.remove(tried)
-backup.name = name
+if tried.users == 0:
+    bpy.data.meshes.remove(tried)
+    backup.name = name
 # Or keep the change: bpy.data.meshes.remove(backup)
 ```
 
