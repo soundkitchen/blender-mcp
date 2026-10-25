@@ -851,7 +851,8 @@ EXPECTED_TOOLS = [
         "*image_path* is the absolute path of the reference (PNG, JPEG...), read from disk.\n"
         "*subject_box* is the subject's box in it, ``[left, top, right, bottom]`` in pixels\n"
         "from the top left of the image. It may be left out for a reference with a transparent\n"
-        "background: the box is then taken from the opaque pixels.\n"
+        "background (at least 5% of the subject's box transparent): the box is then taken from\n"
+        "the opaque pixels.\n"
         "\n"
         "*fit* picks the size matched between the model and the subject: ``HEIGHT`` (default)\n"
         "or ``WIDTH``, e.g. for a subject lying down. Their centers are aligned.\n"
@@ -859,8 +860,8 @@ EXPECTED_TOOLS = [
         "*bounds_min* & *bounds_max* (object space, pass both) limit the model to a box, to\n"
         "compare a part (e.g. the head) with a *subject_box* around the same part.\n"
         "\n"
-        "With a transparent background, the subject's opaque pixels are compared with the\n"
-        "model: the reference panel colors the parts only in the model (red) and only in the\n"
+        "With a transparent background, the subject's opaque pixels (inside *subject_box*) are\n"
+        "compared with the model: the reference panel colors the parts only in the model (red) and only in the\n"
         "reference (blue), the model panel shows the reference's outline (cyan).\n"
         "\n"
         "Returns the image followed by JSON info: ``panels`` (``rect`` in the image: x, y from\n"
@@ -874,8 +875,8 @@ EXPECTED_TOOLS = [
         "each with its ``range`` along the ``up`` or ``right`` axis in object coordinates and\n"
         "its ``model_only`` & ``reference_only`` parts.\n"
         "\n"
-        "*size_limit_in_bytes* is the target image size in bytes.\n"
-        "Zero (the default) uses the MCP message size limit.\n",
+        "*size_limit_in_bytes* is the target image size in bytes, the image is downscaled to fit\n"
+        "(an error when it can't). Zero (the default) uses the MCP message size limit.\n",
         "inputSchema": {
             "properties": {
                 "name": {

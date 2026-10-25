@@ -57,12 +57,8 @@ def _image_downscale_to_size_limit(
 # @include_end
 
 
-# MCP messages are limited to 1,048,576 bytes (1 MB). The image is base64-encoded
-# which expands data by 4/3. Subtract 8 KiB headroom for the JSON envelope and info.
-# NOTE: the same calculation as `_RENDER_IMAGE_SIZE_LIMIT_IN_BYTES`, with more headroom.
-_IMAGE_SIZE_LIMIT_IN_BYTES = ((1_048_576 - 8192) * 3) // 4
-
 # @include_begin: _template_ortho_views.py
+_IMAGE_SIZE_LIMIT_IN_BYTES = 0
 _VIEW_AXES: dict[str, tuple[tuple[int, int], tuple[int, int]]] = {}
 
 
@@ -93,7 +89,11 @@ def _gpu_ensure() -> None:
     pass
 
 
-def _write_png(pixels: bytes, width: int, height: int, filepath: str) -> None:
+def _gpu_state_save() -> tuple[Any, ...]:
+    return ()
+
+
+def _gpu_state_restore(state: tuple[Any, ...]) -> None:
     pass
 # @include_end
 
@@ -511,16 +511,13 @@ def _render(
     Return the labeled and unlabeled vertex indices, and the number of vertices hidden in every view.
     """
     import gpu  # pylint: disable=import-error,no-name-in-module
+    import imbuf  # type: ignore[import-not-found]  # pylint: disable=import-error,no-name-in-module
 
     image_width, image_height = image_size
     # Restore the global GPU state afterwards, the UI draws with it (the point size has no getter,
     # it's reset to the default).
-    state = (
-        gpu.state.blend_get(),
-        gpu.state.depth_test_get(),
-        gpu.state.depth_mask_get(),
-        gpu.state.viewport_get(),
-    )
+    # Defined by `_template_ortho_views.py`.
+    state = _gpu_state_save()
     offscreen = gpu.types.GPUOffScreen(image_width, image_height, format='RGBA8')
     try:
         with offscreen.bind():
@@ -536,15 +533,17 @@ def _render(
             pixels = framebuffer.read_color(0, 0, image_width, image_height, 4, 0, 'UBYTE')
     finally:
         offscreen.free()
-        blend, depth_test, depth_mask, viewport = state
-        gpu.state.blend_set(blend)
-        gpu.state.depth_test_set(depth_test)
-        gpu.state.depth_mask_set(depth_mask)
-        gpu.state.viewport_set(*viewport)
+        _gpu_state_restore(state)
         gpu.state.point_size_set(1.0)
 
     pixels.dimensions = image_width * image_height * 4
-    _write_png(bytes(pixels), image_width, image_height, filepath)
+    im = imbuf.new((image_width, image_height))
+    try:
+        with im.with_buffer(write=True) as buf:
+            buf.cast('B')[:] = bytes(pixels)
+        imbuf.write(im, filepath=filepath)
+    finally:
+        im.free()
 
     hidden = sum(
         1 for index, inside in enumerate(drawn)

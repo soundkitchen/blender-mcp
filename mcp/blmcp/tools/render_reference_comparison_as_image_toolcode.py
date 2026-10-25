@@ -68,6 +68,7 @@ class Result(NamedTuple):
 
 
 # @include_begin: _template_ortho_views.py
+_IMAGE_SIZE_LIMIT_IN_BYTES = 0
 _VIEW_AXES: dict[str, tuple[tuple[int, int], tuple[int, int]]] = {}
 
 
@@ -97,15 +98,20 @@ def _ortho_matrix(
 def _gpu_ensure() -> None:
     pass
 
+
+def _gpu_state_save() -> tuple[Any, ...]:
+    return ()
+
+
+def _gpu_state_restore(state: tuple[Any, ...]) -> None:
+    pass
 # @include_end
 
 
-# MCP messages are limited to 1,048,576 bytes (1 MB). The image is base64-encoded
-# which expands data by 4/3. Subtract 8 KiB headroom for the JSON envelope and info.
-# NOTE: the same calculation as in `render_mesh_wireframe_as_image`.
-_IMAGE_SIZE_LIMIT_IN_BYTES = ((1_048_576 - 8192) * 3) // 4
 # The image shows a photo: JPEG keeps it much smaller than PNG at the same size in pixels.
 _JPEG_QUALITY = 85
+# Lower qualities tried when the smallest image is still over the size limit.
+_JPEG_QUALITIES_FALLBACK = (70, 50, 30)
 # The smallest image (pixels on the short side) when downscaling to the size limit.
 _IMAGE_SIZE_MIN = 64
 
@@ -121,6 +127,9 @@ _MEASURE_SIZE = 1024
 _MARGIN = 0.08
 # Pixels with at least this alpha (0-1) belong to the subject of a reference with transparency.
 _ALPHA_THRESHOLD = 0.5
+# A reference has a transparent background when at least this fraction of the subject's box
+# is transparent: a few transparent pixels (rounded corners, a window's shadow) are not enough.
+_TRANSPARENT_FRACTION_MIN = 0.05
 # The number of bands the silhouettes are split in, along each screen axis.
 _BANDS = 10
 
@@ -280,30 +289,6 @@ def _draw_model(geometry: _Geometry, view: _View, x: int, y: int, shaded: bool) 
         gpu.state.depth_mask_set(False)
 
 
-def _gpu_state_save() -> tuple[Any, ...]:
-    import gpu  # pylint: disable=import-error,no-name-in-module
-
-    return (
-        gpu.state.blend_get(),
-        gpu.state.depth_test_get(),
-        gpu.state.depth_mask_get(),
-        gpu.state.viewport_get(),
-    )
-
-
-def _gpu_state_restore(state: tuple[Any, ...]) -> None:
-    """
-    Restore the global GPU state saved by ``_gpu_state_save``, the UI draws with it.
-    """
-    import gpu  # pylint: disable=import-error,no-name-in-module
-
-    blend, depth_test, depth_mask, viewport = state
-    gpu.state.blend_set(blend)
-    gpu.state.depth_test_set(depth_test)
-    gpu.state.depth_mask_set(depth_mask)
-    gpu.state.viewport_set(*viewport)
-
-
 def _model_mask(geometry: _Geometry, view: _View) -> _Array:
     """
     Return where the model covers the view, as a ``(height, width)`` bool array (rows from the bottom up).
@@ -311,6 +296,7 @@ def _model_mask(geometry: _Geometry, view: _View) -> _Array:
     import gpu  # pylint: disable=import-error,no-name-in-module
     import numpy as np  # pylint: disable=import-error
 
+    # Defined by `_template_ortho_views.py`.
     state = _gpu_state_save()
     offscreen = gpu.types.GPUOffScreen(view.width, view.height, format='RGBA8')
     try:
@@ -371,10 +357,9 @@ def _outline(mask: _Array) -> _Array:
     return mask & ~inner
 
 
-def _load_reference(filepath: str) -> tuple[_Array, bool]:
+def _load_reference(filepath: str) -> _Array:
     """
-    Return the image at *filepath* as a ``(height, width, 4)`` float32 array with premultiplied alpha
-    (rows from the bottom up), and whether it has transparent pixels.
+    Return the image at *filepath* as a ``(height, width, 4)`` uint8 RGBA array (rows from the bottom up).
     """
     import imbuf  # type: ignore[import-not-found]  # pylint: disable=import-error,no-name-in-module
     import numpy as np  # pylint: disable=import-error
@@ -390,10 +375,21 @@ def _load_reference(filepath: str) -> tuple[_Array, bool]:
     if pixels.shape[2] < 4:
         alpha = np.full(pixels.shape[:2] + (1,), 255, dtype=np.uint8)
         pixels = np.concatenate([pixels[:, :, :3], alpha], axis=2)
-    image = pixels.astype(np.float32) / 255.0
-    image[:, :, :3] *= image[:, :, 3:4]
-    has_alpha = bool((image[:, :, 3] < _ALPHA_THRESHOLD).any())
-    return image, has_alpha
+    return pixels
+
+
+def _transparent_fraction(alpha: _Array, box: tuple[float, float, float, float]) -> float:
+    """
+    Return the fraction of the pixels in *box* (pixels from the bottom left) that are transparent.
+    """
+    import math
+
+    height, width = alpha.shape
+    x0, y0 = max(0, math.floor(box[0])), max(0, math.floor(box[1]))
+    x1, y1 = min(width, math.ceil(box[2])), min(height, math.ceil(box[3]))
+    if x1 <= x0 or y1 <= y0:
+        return 0.0
+    return float((alpha[y0:y1, x0:x1] < round(_ALPHA_THRESHOLD * 255)).mean())
 
 
 def _sample_reference(
@@ -403,8 +399,8 @@ def _sample_reference(
         height: int,
 ) -> _Array:
     """
-    Return the *region* ``(x0, y0, x1, y1)`` of *image* (pixels, from the bottom left)
-    resampled to *width* x *height*, premultiplied RGBA. Outside the image is transparent.
+    Return the *region* ``(x0, y0, x1, y1)`` of the uint8 RGBA *image* (pixels, from the bottom left)
+    resampled to *width* x *height*, as float32 premultiplied RGBA. Outside the image is transparent.
     """
     import numpy as np  # pylint: disable=import-error
 
@@ -421,8 +417,10 @@ def _sample_reference(
     result = np.zeros((height, width, 4), dtype=np.float32)
     if cx1 - cx0 < factor or cy1 - cy0 < factor:
         return result
+    # Only the cropped part is converted, the whole image may be large.
     crop = image[cy0:cy1, cx0:cx1]
-    crop = crop[:crop.shape[0] // factor * factor, :crop.shape[1] // factor * factor]
+    crop = crop[:crop.shape[0] // factor * factor, :crop.shape[1] // factor * factor].astype(np.float32) / 255.0
+    crop[:, :, :3] *= crop[:, :, 3:4]
     if factor > 1:
         crop = crop.reshape(crop.shape[0] // factor, factor, crop.shape[1] // factor, factor, 4).mean(axis=(1, 3))
     # The reduced pixel under the center of each output pixel.
@@ -487,6 +485,17 @@ def _band_fractions(
     return bands(y0, y1, 1, True), bands(x0, x1, 0, False)
 
 
+def _title_width(text: str) -> int:
+    """
+    Return the width in pixels taken by the title *text*, with its padding.
+    """
+    import blf  # pylint: disable=import-error,no-name-in-module
+
+    font_id = 0
+    blf.size(font_id, _FONT_SIZE)
+    return int(blf.dimensions(font_id, text)[0]) + 16
+
+
 def _draw_titles(titles: list[tuple[str, int]], image_width: int, panel_height: int) -> None:
     """
     Draw each title at its x position above the panels, in image pixel space.
@@ -516,12 +525,12 @@ def _blend(pixels: _Array, mask: _Array, color: tuple[float, float, float], opac
     pixels[mask] = pixels[mask] * (1.0 - opacity) + np.array(color, dtype=np.float32) * opacity
 
 
-def _encode_jpeg(rgba: _Array, filepath: str, size_limit_in_bytes: int) -> tuple[bytes, int, int]:
+def _encode_jpeg(rgba: _Array, filepath: str, size_limit_in_bytes: int) -> tuple[bytes, int, int] | None:
     """
     Encode the ``(height, width, 4)`` uint8 array *rgba* (rows from the bottom up) as a JPEG,
-    downscaled to stay under *size_limit_in_bytes* when needed.
+    downscaled (keeping the aspect ratio), then at lower qualities, to stay under *size_limit_in_bytes*.
 
-    Return the file contents and the size of the encoded image.
+    Return the file contents and the size of the encoded image, None when it can't fit.
     """
     import math
 
@@ -534,19 +543,30 @@ def _encode_jpeg(rgba: _Array, filepath: str, size_limit_in_bytes: int) -> tuple
             buf.cast('B')[:] = rgba.tobytes()
         im.file_type = 'JPEG'
         im.quality = _JPEG_QUALITY
-        while True:
+
+        def encode() -> bytes:
             imbuf.write(im, filepath=filepath)
             with open(filepath, "rb") as fh:
-                data = fh.read()
-            if len(data) <= size_limit_in_bytes:
-                break
+                return fh.read()
+
+        data = encode()
+        while len(data) > size_limit_in_bytes:
             # The size scales roughly with the pixel count, shrink a little more than needed.
             factor = math.sqrt(size_limit_in_bytes / len(data)) * 0.95
+            # Keep the aspect ratio of the drawn image, the layout info is scaled by the width.
             new_width = int(im.size[0] * factor)
-            new_height = int(im.size[1] * factor)
+            new_height = round(new_width * height / width)
             if min(new_width, new_height) < _IMAGE_SIZE_MIN:
                 break
             im.resize((new_width, new_height), method='BILINEAR')
+            data = encode()
+        for quality in _JPEG_QUALITIES_FALLBACK:
+            if len(data) <= size_limit_in_bytes:
+                break
+            im.quality = quality
+            data = encode()
+        if len(data) > size_limit_in_bytes:
+            return None
         return data, im.size[0], im.size[1]
     finally:
         im.free()
@@ -600,13 +620,14 @@ def main(params: Params) -> Result:
         return Result(status="error", message="Image not found: {!r}".format(params.image_path))
 
     try:
-        reference, has_alpha = _load_reference(image_path)
+        reference = _load_reference(image_path)
     except Exception as ex:
         return Result(status="error", message="Can't read the image {!r}: {:s}".format(params.image_path, str(ex)))
     reference_height, reference_width = reference.shape[:2]
+    alpha = reference[:, :, 3]
 
     # The subject in the reference, pixels from the bottom left.
-    reference_mask_full = reference[:, :, 3] >= _ALPHA_THRESHOLD
+    no_background_message = "Pass subject_box: the image has no transparent background to find the subject in"
     if params.subject_box is not None:
         box_or_error = _parse_box(params.subject_box, reference_height)
         if isinstance(box_or_error, str):
@@ -615,16 +636,14 @@ def main(params: Params) -> Result:
         if box[2] <= 0 or box[0] >= reference_width or box[3] <= 0 or box[1] >= reference_height:
             return Result(status="error", message="subject_box is outside the image ({:d} x {:d} pixels)".format(
                 reference_width, reference_height))
-    elif has_alpha:
-        alpha_extent = _mask_extent(reference_mask_full)
+    else:
+        alpha_extent = _mask_extent(alpha >= round(_ALPHA_THRESHOLD * 255))
         if alpha_extent is None:
             return Result(status="error", message="The image is fully transparent")
         box = tuple(float(v) for v in alpha_extent)  # type: ignore[assignment]
-    else:
-        return Result(
-            status="error",
-            message="Pass subject_box: the image has no transparent background to find the subject in",
-        )
+    has_alpha = _transparent_fraction(alpha, box) >= _TRANSPARENT_FRACTION_MIN
+    if params.subject_box is None and not has_alpha:
+        return Result(status="error", message=no_background_message)
 
     right, up = _VIEW_AXES[params.view]
     geometry = _read_geometry(obj)
@@ -656,31 +675,34 @@ def main(params: Params) -> Result:
 
     _gpu_ensure()
 
-    # Measure the model's silhouette in the region.
-    measure_units_per_pixel = max(rect_size) * (1.0 + 2.0 * _MARGIN) / _MEASURE_SIZE
-    measure_view = _View(
-        right, up,
-        ((rect_lo[0] + rect_hi[0]) / 2.0, (rect_lo[1] + rect_hi[1]) / 2.0),
-        measure_units_per_pixel,
-        max(1, math.ceil(rect_size[0] * (1.0 + 2.0 * _MARGIN) / measure_units_per_pixel)),
-        max(1, math.ceil(rect_size[1] * (1.0 + 2.0 * _MARGIN) / measure_units_per_pixel)),
-        depth_range,
-    )
-    measure_mask = _clip_to_rect(_model_mask(geometry, measure_view), measure_view, bounds_rect)
-    measure_extent = _mask_extent(measure_mask)
-    if measure_extent is None:
-        return Result(status="error", message="Nothing of {!r} is drawn{:s}".format(
-            obj.name, " within the bounds" if bounds_rect else ""))
-    model_lo = [
-        measure_view.center[i] + (measure_extent[i] - (measure_view.width, measure_view.height)[i] / 2.0)
-        * measure_units_per_pixel
-        for i in range(2)
-    ]
-    model_hi = [
-        measure_view.center[i] + (measure_extent[i + 2] - (measure_view.width, measure_view.height)[i] / 2.0)
-        * measure_units_per_pixel
-        for i in range(2)
-    ]
+    if bounds_rect is None:
+        # Without bounds nothing is clipped: the vertices give the silhouette's extent.
+        model_lo, model_hi = rect_lo, rect_hi
+    else:
+        # Measure the model's silhouette clipped to the bounds.
+        measure_units_per_pixel = max(rect_size) * (1.0 + 2.0 * _MARGIN) / _MEASURE_SIZE
+        measure_view = _View(
+            right, up,
+            ((rect_lo[0] + rect_hi[0]) / 2.0, (rect_lo[1] + rect_hi[1]) / 2.0),
+            measure_units_per_pixel,
+            max(1, math.ceil(rect_size[0] * (1.0 + 2.0 * _MARGIN) / measure_units_per_pixel)),
+            max(1, math.ceil(rect_size[1] * (1.0 + 2.0 * _MARGIN) / measure_units_per_pixel)),
+            depth_range,
+        )
+        measure_mask = _clip_to_rect(_model_mask(geometry, measure_view), measure_view, bounds_rect)
+        measure_extent = _mask_extent(measure_mask)
+        if measure_extent is None:
+            return Result(status="error", message="Nothing of {!r} is drawn within the bounds".format(obj.name))
+        model_lo = [
+            measure_view.center[i] + (measure_extent[i] - (measure_view.width, measure_view.height)[i] / 2.0)
+            * measure_units_per_pixel
+            for i in range(2)
+        ]
+        model_hi = [
+            measure_view.center[i] + (measure_extent[i + 2] - (measure_view.width, measure_view.height)[i] / 2.0)
+            * measure_units_per_pixel
+            for i in range(2)
+        ]
     model_size = [hi - lo for lo, hi in zip(model_lo, model_hi)]
     model_center = [(lo + hi) / 2.0 for lo, hi in zip(model_lo, model_hi)]
 
@@ -700,8 +722,15 @@ def main(params: Params) -> Result:
     region_hi = [v + margin for v in region_hi]
     region_size = [hi - lo for lo, hi in zip(region_lo, region_hi)]
 
+    title_view = "{:s} (right: {:s}, up: {:s})".format(params.view, _axis_label(right), _axis_label(up))
+    title_texts = [
+        "REFERENCE  yellow: model outline" + ("  red: only model  blue: only reference" if has_alpha else ""),
+        "MODEL  " + title_view + ("  cyan: reference outline" if has_alpha else ""),
+    ]
+
     pixels_per_reference_pixel = min(_PANEL_WIDTH_MAX / region_size[0], _PANEL_HEIGHT_MAX / region_size[1])
-    panel_width = max(1, round(region_size[0] * pixels_per_reference_pixel))
+    # A narrow region is widened (more room around it) so the titles fit their panel.
+    panel_width = max(round(region_size[0] * pixels_per_reference_pixel), *(_title_width(t) for t in title_texts))
     panel_height = max(1, round(region_size[1] * pixels_per_reference_pixel))
     # Make the region match the rounded panel size exactly.
     reference_per_pixel = 1.0 / pixels_per_reference_pixel
@@ -728,19 +757,19 @@ def main(params: Params) -> Result:
     sampled = _sample_reference(reference, region, panel_width, panel_height)
     background = np.array(_COLOR_BACKGROUND, dtype=np.float32)
     reference_rgb = sampled[:, :, :3] + background * (1.0 - sampled[:, :, 3:4])
-    reference_mask = sampled[:, :, 3] >= _ALPHA_THRESHOLD if has_alpha else None
+    reference_mask = None
+    if has_alpha:
+        # Only the subject's box: other opaque parts of the image (e.g. the body below the head
+        # boxed with `subject_box`, another drawing on a sheet) are not the subject.
+        xs = region[0] + (np.arange(panel_width) + 0.5) * reference_per_pixel
+        ys = region[1] + (np.arange(panel_height) + 0.5) * reference_per_pixel
+        in_box = ((box[1] <= ys) & (ys <= box[3]))[:, None] & ((box[0] <= xs) & (xs <= box[2]))[None, :]
+        reference_mask = (sampled[:, :, 3] >= _ALPHA_THRESHOLD) & in_box
 
     # The model panel, drawn under the titles.
     image_width = panel_width * 2
     image_height = panel_height + _PANEL_TITLE_HEIGHT
-    title_view = "{:s} (right: {:s}, up: {:s})".format(params.view, _axis_label(right), _axis_label(up))
-    titles = [
-        (
-            "REFERENCE  yellow: model outline" + ("  red: only model  blue: only reference" if has_alpha else ""),
-            0,
-        ),
-        ("MODEL  " + title_view + ("  cyan: reference outline" if has_alpha else ""), panel_width),
-    ]
+    titles = [(title_texts[0], 0), (title_texts[1], panel_width)]
     import gpu  # pylint: disable=import-error,no-name-in-module
     state = _gpu_state_save()
     offscreen = gpu.types.GPUOffScreen(image_width, image_height, format='RGBA8')
@@ -782,13 +811,15 @@ def main(params: Params) -> Result:
 
     size_limit = params.size_limit_in_bytes if params.size_limit_in_bytes > 0 else _IMAGE_SIZE_LIMIT_IN_BYTES
     with tempfile.TemporaryDirectory(prefix="blmcp_reference_") as tmpdir:
-        image_data, encoded_width, image_height = _encode_jpeg(
-            rgba, os.path.join(tmpdir, "comparison.jpg"), size_limit,
-        )
+        encoded = _encode_jpeg(rgba, os.path.join(tmpdir, "comparison.jpg"), size_limit)
+    if encoded is None:
+        return Result(status="error", message="The image can't fit in size_limit_in_bytes={:d}".format(size_limit))
+    image_data, encoded_width, encoded_height = encoded
 
     # The returned image may have been downscaled to fit the size limit, scale the layout to match.
     scale = encoded_width / image_width
-    image_width = encoded_width
+    scale_y = encoded_height / image_height
+    image_width, image_height = encoded_width, encoded_height
 
     metrics: dict[str, Any] = {}
     if reference_mask is not None:
@@ -815,7 +846,10 @@ def main(params: Params) -> Result:
         right=_axis_label(right),
         up=_axis_label(up),
         panels=[
-            {"content": content, "rect": [round(v * scale) for v in (x, 0, panel_width, panel_height)]}
+            {
+                "content": content,
+                "rect": [round(x * scale), 0, round(panel_width * scale), round(panel_height * scale_y)],
+            }
             for content, x in (("reference", 0), ("model", panel_width))
         ],
         units_per_pixel=round(view.units_per_pixel / scale, 8),

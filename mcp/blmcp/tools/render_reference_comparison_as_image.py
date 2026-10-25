@@ -58,7 +58,8 @@ def register(mcp: MCPServer) -> None:
         *image_path* is the absolute path of the reference (PNG, JPEG...), read from disk.
         *subject_box* is the subject's box in it, ``[left, top, right, bottom]`` in pixels
         from the top left of the image. It may be left out for a reference with a transparent
-        background: the box is then taken from the opaque pixels.
+        background (at least 5% of the subject's box transparent): the box is then taken from
+        the opaque pixels.
 
         *fit* picks the size matched between the model and the subject: ``HEIGHT`` (default)
         or ``WIDTH``, e.g. for a subject lying down. Their centers are aligned.
@@ -66,8 +67,8 @@ def register(mcp: MCPServer) -> None:
         *bounds_min* & *bounds_max* (object space, pass both) limit the model to a box, to
         compare a part (e.g. the head) with a *subject_box* around the same part.
 
-        With a transparent background, the subject's opaque pixels are compared with the
-        model: the reference panel colors the parts only in the model (red) and only in the
+        With a transparent background, the subject's opaque pixels (inside *subject_box*) are
+        compared with the model: the reference panel colors the parts only in the model (red) and only in the
         reference (blue), the model panel shows the reference's outline (cyan).
 
         Returns the image followed by JSON info: ``panels`` (``rect`` in the image: x, y from
@@ -81,8 +82,8 @@ def register(mcp: MCPServer) -> None:
         each with its ``range`` along the ``up`` or ``right`` axis in object coordinates and
         its ``model_only`` & ``reference_only`` parts.
 
-        *size_limit_in_bytes* is the target image size in bytes.
-        Zero (the default) uses the MCP message size limit.
+        *size_limit_in_bytes* is the target image size in bytes, the image is downscaled to fit
+        (an error when it can't). Zero (the default) uses the MCP message size limit.
         """
         p = Params(
             name=name,

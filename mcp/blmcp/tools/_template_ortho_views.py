@@ -2,12 +2,18 @@
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 
-# Inline the orthographic view helpers: `_VIEW_AXES`, `_AXIS_NAMES`, `_axis_label`, `_screen`,
-# `_depth`, `_ortho_matrix`, `_gpu_ensure` & `_write_png`.
+# Inline the orthographic view helpers: `_IMAGE_SIZE_LIMIT_IN_BYTES`, `_VIEW_AXES`, `_AXIS_NAMES`,
+# `_axis_label`, `_screen`, `_depth`, `_ortho_matrix`, `_gpu_ensure`, `_gpu_state_save`
+# & `_gpu_state_restore`.
 
 __all__ = ()
 
 from typing import Any
+
+# MCP messages are limited to 1,048,576 bytes (1 MB). The image is base64-encoded
+# which expands data by 4/3. Subtract 8 KiB headroom for the JSON envelope and info.
+# NOTE: the same calculation as `_RENDER_IMAGE_SIZE_LIMIT_IN_BYTES`, with more headroom.
+_IMAGE_SIZE_LIMIT_IN_BYTES = ((1_048_576 - 8192) * 3) // 4
 
 # Each view maps object-space axes to the screen: `(right, up)` as `(axis, sign)`.
 # The viewer looks along `right x up` reversed, matching Blender's numpad views.
@@ -96,16 +102,28 @@ def _gpu_ensure() -> None:
         gpu.init()
 
 
-def _write_png(pixels: bytes, width: int, height: int, filepath: str) -> None:
+def _gpu_state_save() -> tuple[Any, ...]:
     """
-    Write the RGBA bytes *pixels* (rows from the bottom up) to *filepath* as a PNG.
+    Return the global GPU state changed by drawing offscreen, to restore with ``_gpu_state_restore``.
     """
-    import imbuf  # type: ignore[import-not-found]  # pylint: disable=import-error,no-name-in-module
+    import gpu  # pylint: disable=import-error,no-name-in-module
 
-    im = imbuf.new((width, height))
-    try:
-        with im.with_buffer(write=True) as buf:
-            buf.cast('B')[:] = pixels
-        imbuf.write(im, filepath=filepath)
-    finally:
-        im.free()
+    return (
+        gpu.state.blend_get(),
+        gpu.state.depth_test_get(),
+        gpu.state.depth_mask_get(),
+        gpu.state.viewport_get(),
+    )
+
+
+def _gpu_state_restore(state: tuple[Any, ...]) -> None:
+    """
+    Restore the global GPU state saved by ``_gpu_state_save``, the UI draws with it.
+    """
+    import gpu  # pylint: disable=import-error,no-name-in-module
+
+    blend, depth_test, depth_mask, viewport = state
+    gpu.state.blend_set(blend)
+    gpu.state.depth_test_set(depth_test)
+    gpu.state.depth_mask_set(depth_mask)
+    gpu.state.viewport_set(*viewport)
