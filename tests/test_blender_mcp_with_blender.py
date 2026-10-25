@@ -1763,10 +1763,11 @@ class _TestServerMixin:
             result["merge_kept"] = subd.setup_mirror_subsurf(small, levels=3)["merge_threshold"]
             small.modifiers[0].merge_threshold = 0.001
             result["merge_default"] = subd.setup_mirror_subsurf(small)["merge_threshold"]
-            try:
-                subd.setup_mirror_subsurf(small, merge_threshold=0.0)
-            except ValueError as ex:
-                result["merge_zero"] = str(ex)
+            for value in (0.0, float("nan")):
+                try:
+                    subd.setup_mirror_subsurf(small, merge_threshold=value)
+                except ValueError as ex:
+                    result.setdefault("merge_invalid", []).append(str(ex))
             result["merge_empty"] = subd.setup_mirror_subsurf(
                 bpy.data.objects.new("EmptyCage", bpy.data.meshes.new("EmptyCage")))["merge_threshold"]
             # A Mirror on Y too: Y is measured with its mirrored copy (0.06 wide).
@@ -1812,7 +1813,8 @@ class _TestServerMixin:
         self.assertAlmostEqual(data["merge_given"], 0.0002)
         self.assertAlmostEqual(data["merge_kept"], 0.0002)
         self.assertAlmostEqual(data["merge_default"], 0.00017)
-        self.assertIn("merge_threshold must be more than 0", data["merge_zero"])
+        self.assertEqual(len(data["merge_invalid"]), 2)
+        self.assertIn("merge_threshold must be more than 0", data["merge_invalid"][0])
         self.assertAlmostEqual(data["merge_y"], 0.00006)
         self.assertAlmostEqual(data["merge_edit"], 0.000085)
         self.assertAlmostEqual(data["merge_empty"], 0.001)

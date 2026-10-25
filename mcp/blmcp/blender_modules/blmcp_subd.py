@@ -356,7 +356,7 @@ def setup_mirror_subsurf(
     """
     if obj.type != 'MESH':
         raise TypeError("Object {!r} is a {:s}, not a mesh".format(obj.name, obj.type))
-    if merge_threshold is not None and merge_threshold <= 0.0:
+    if merge_threshold is not None and not merge_threshold > 0.0:  # Also NaN.
         raise ValueError("merge_threshold must be more than 0, not {!r}".format(merge_threshold))
     mods = obj.modifiers
     mirror = next((m for m in mods if m.type == 'MIRROR' and m.mirror_object is None), None)
