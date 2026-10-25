@@ -37,6 +37,10 @@ initial_instructions: |
   how to check each step, the `blmcp_subd` editing helpers and gives tested example code
   to start from.
 
+  Whatever the subject, model it from references: references given by the user come first,
+  also search the web and look at the images themselves. List the features (counts of parts,
+  proportions, characteristic shapes) before modeling and compare the result with them.
+
   # Executing Code
 
   The `execute_blender_code` tool runs Python code via `bpy` in the connected Blender instance.

@@ -15,11 +15,42 @@ Subdivision Surface modifier gives smooth, editable shapes.
 * **Quads only.** Every face should have 4 sides. Poles (vertices with 3 or 5 edges) are
   expected where limbs leave the torso, keep them there rather than on visible curves.
 * **Check after every step** (see *Checking*), fix problems before shaping further.
+* **Shape from references.** Collect references and list the subject's features before
+  modeling, compare the model with them at the end (see *References*).
 
 The Skin modifier (a vertex/edge skeleton with radii) is a quick alternative, but at
 branches (chest to shoulders, pelvis to legs) it often makes separate parts, poles with
 8 edges and triangles that need manual repair. If you use it, check `islands` right after
 converting it to a mesh, and cut the whole mesh to a half cage with `subd.make_half`.
+
+## References
+
+A clean cage can still have the wrong shape: check the subject itself, from images, not
+only from text. Text descriptions leave out what the shape needs (e.g. how many toes a bird
+has, how deep its beak is at the base).
+
+1. **Collect references.**
+   * References given by the user come first: follow them where other sources disagree.
+   * Also search the web for more. Look at the images themselves (download and view them
+     when you can): side and front views, close-ups of the parts that matter (head, hands,
+     feet) and sizes (length, height).
+   * If you can't view images, tell the user and ask for references or a description
+     rather than guessing.
+2. **List the features** from the references, before modeling:
+   * Counts: digits per hand and foot and where they point, ears, horns, tail feathers...
+   * Proportions to one unit (e.g. the head height): total height or length, limbs, widths.
+   * Characteristic shapes: e.g. a beak's depth at the base and its hook, a muzzle,
+     how the body is tilted.
+   * Colors and where they change, when materials are part of the task.
+   * The size in meters (the real size, unless the user asked otherwise).
+3. **Compare at the end** (and after large changes): images of the model in the same views
+   as the references, side by side, going through the list item by item. Fix what doesn't
+   match: the topology checks don't tell whether the shape is right.
+
+The *Steps* and the *Example* below build a human. For another subject (an animal, a
+creature), keep the approach (rings, extrusions, roles), but take the parts, how many there
+are and their shapes from your list, not from the human steps: e.g. a human foot is one
+block, a parrot's foot has 4 toes, 2 pointing forward and 2 back.
 
 ## Helpers
 
@@ -95,24 +126,26 @@ if tried.users == 0:
 
 ## Steps
 
-1. **Check the scene units** (`scene.unit_settings`), sizes below are in meters for a
+1. **References.** Collect them and list the features (see *References*).
+2. **Check the scene units** (`scene.unit_settings`), sizes below are in meters for a
    1.7 m character.
-2. **Torso rings.** Each ring has 6 points on the half: center front, mid front, side front,
+3. **Torso rings.** Each ring has 6 points on the half: center front, mid front, side front,
    side back, mid back, center back. 5 faces per segment leave room for the limbs:
    split the bottom cap in two (inner: crotch, outer: leg root) and the top cap in two
    (inner: neck root, outer: shoulder top). The arm root is the side face of the top segment.
-3. **Legs.** Extrude the outer bottom face down: thigh, knee, calf, ankle, then a heel block
+4. **Legs.** Extrude the outer bottom face down: thigh, knee, calf, ankle, then a heel block
    on the ground. Extrude the front face of the heel block forward for the ball of the foot
    and the toes. Keep the sole at `Z = 0`.
-4. **Arms.** Extrude the side face out along `+X`: shoulder, elbow, wrist, hand.
-5. **Neck and head.** Extrude the inner top face up: neck, jaw, widest part of the skull, top.
-6. **Shape.** Move vertices by index with `render_mesh_wireframe_as_image` (zoom in with
+5. **Arms.** Extrude the side face out along `+X`: shoulder, elbow, wrist, hand.
+6. **Neck and head.** Extrude the inner top face up: neck, jaw, widest part of the skull, top.
+7. **Shape.** Move vertices by index with `render_mesh_wireframe_as_image` (zoom in with
    `bounds_min`/`bounds_max`), add edge loops where a shape needs more detail
    (`subd.insert_loop`, then `subd.scale_loop`), move broad areas with `subd.move_smooth`
    and sharpen edges with `subd.set_crease` (see *Helpers*).
-7. **Ground contact.** Subdivision shrinks the shape: check the lowest point after modifiers
+8. **Ground contact.** Subdivision shrinks the shape: check the lowest point after modifiers
    (`bounds_world` of `get_object_geometry_summary`) and move the cage so it touches the
    ground, see *Ground contact* below.
+9. **Compare with the references**, item by item (see *References*), and fix what differs.
 
 ## Pitfalls
 
@@ -145,7 +178,8 @@ if tried.users == 0:
   `FRONT` and `RIGHT` for the whole body, `TOP` for the arms (seen from the side they
   overlap the torso), then zoom in on details. Twisted rings and crossing edges show up
   here, not in the topology summary.
-* A screenshot or render for the final look.
+* A screenshot or render for the final look, compared with the references in the same
+  views (see *References*).
 
 ## Ground contact
 
