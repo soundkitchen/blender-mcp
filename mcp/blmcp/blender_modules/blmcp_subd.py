@@ -349,7 +349,7 @@ def setup_mirror_subsurf(
 
     The Mirror's merge distance is *merge_threshold* when given. Otherwise a new Mirror, or one
     still at Blender's default (1 mm), gets 1/1000 of the mirrored cage's largest size, at most
-    1 mm: a small model (e.g. a 17 cm bird) needs a smaller one, or vertices close to the plane
+    1 mm: a small model (e.g. 17 cm long) needs a smaller one, or vertices close to the plane
     are merged. Other values set on a reused Mirror are kept. Sizes are in the object's local
     units. Build the cage first. Return the names of the modifiers, in their final order, and
     the merge distance.
