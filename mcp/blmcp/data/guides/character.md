@@ -94,11 +94,12 @@ the selection or the mode:
   their distance.
 * `subd.symmetrize(bm, source='+X')`: copies one side of a whole mesh (without a Mirror
   modifier) onto the other.
-* `subd.setup_mirror_subsurf(obj, levels=2)`: the Mirror (merge, clipping) then Subdivision
-  Surface modifiers, reusing and reordering existing ones. Call it once the cage is built:
-  a new Mirror's merge distance follows the cage's size: 1/1000 of it, at most 1 mm (1 mm for
-  a human, 0.17 mm for a 17 cm bird, in the object's local units). A Mirror you set yourself
-  keeps its value. Then check `off_center_vertices`: vertices just off the plane, no longer
+* `subd.setup_mirror_subsurf(obj, levels=2, merge_threshold=None)`: the Mirror (merge,
+  clipping) then Subdivision Surface modifiers, reusing and reordering existing ones, and
+  returns the `merge_threshold` used. Pass `merge_threshold` to set the merge distance.
+  Otherwise call it once the cage is built: a new Mirror's merge distance follows the cage's
+  size, 1/1000 of it, at most 1 mm (1 mm for a human, 0.17 mm for a 17 cm bird, in the
+  object's local units). A value you set on an existing Mirror is kept. Then check `off_center_vertices`: vertices just off the plane, no longer
   merged with a smaller distance, leave the seam open; move them onto it with `make_half`.
 
 `scale_loop` and `move_smooth` keep the vertices on the mirror plane on it, for a half cage
