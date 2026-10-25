@@ -99,8 +99,11 @@ the selection or the mode:
   returns the `merge_threshold` used. Pass `merge_threshold` to set the merge distance.
   Otherwise call it once the cage is built: a new Mirror's merge distance follows the cage's
   size, 1/1000 of it, at most 1 mm (1 mm for a human, 0.17 mm for a 17 cm bird, in the
-  object's local units). A value you set on an existing Mirror is kept. Then check `off_center_vertices`: vertices just off the plane, no longer
-  merged with a smaller distance, leave the seam open; move them onto it with `make_half`.
+  object's local units). A value you set on an existing Mirror is kept. Then check
+  `off_center_vertices`: vertices just off the plane, no longer merged with a smaller
+  distance, leave the seam open. Move them onto it with `make_half`, passing a `tolerance`
+  above the largest of their distances (its default, as small as the merge distance,
+  leaves them, and removes those on the `-X` side).
 
 `scale_loop` and `move_smooth` keep the vertices on the mirror plane on it, for a half cage
 under a Mirror modifier: pass `mirror=False` for a whole mesh (e.g. after `symmetrize`).
