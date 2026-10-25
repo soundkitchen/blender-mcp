@@ -42,7 +42,8 @@ the selection or the mode:
 * `subd.move_smooth(bm, verts, offset, radius)`: moves vertices, the vertices around them
   follow less and less up to `radius` (proportional editing). The distance is measured along
   the edges by default, so a nearby part that isn't joined (e.g. the torso next to an arm)
-  doesn't follow.
+  doesn't follow. Include the whole part beyond the moved vertices (e.g. the hand when
+  lowering the wrist): otherwise it only follows partly and bends at the moved vertices.
 * `subd.set_crease(bm, edges, value)`: subdivision crease, from 0 (smooth) to 1 (sharp edge).
 * `subd.make_half(bm, tolerance=0.001)`: cuts a whole mesh at `X = 0` into a half cage (open
   on the plane), moving the vertices within `tolerance` onto it. Also fixes
@@ -74,6 +75,20 @@ with subd.edit_mesh(obj) as bm:
     subd.scale_loop(loop, (1.1, 1.0, 1.0))  # Wider, around X = 0 for this half ring.
     # Read the indices inside the block: the bmesh is freed at its end.
     result = {"loop": [v.index for v in loop]}
+```
+
+To try a change and go back, copy the mesh first (in Object Mode) instead of restoring
+positions by hand:
+
+```python
+backup = obj.data.copy()  # Before the change, keep it until the result is checked.
+# Undo: put the copy back and remove the changed mesh.
+tried = obj.data
+name = tried.name
+obj.data = backup
+bpy.data.meshes.remove(tried)
+backup.name = name
+# Or keep the change: bpy.data.meshes.remove(backup)
 ```
 
 ## Steps
@@ -178,7 +193,7 @@ import blmcp_subd as subd
 
 NAME = "Character"    # Check the name is free: Blender appends ".001" on a collision.
 HEIGHT = 1.7          # Meters, the proportions below are for 1.7 and scaled to this.
-LOCATION = (0.0, 0.0, 0.0)
+LOCATION = (0.0, 0.0, 0.0)  # Pick a free spot, away from the objects already in the scene.
 
 S = HEIGHT / 1.7
 bm = bmesh.new()
