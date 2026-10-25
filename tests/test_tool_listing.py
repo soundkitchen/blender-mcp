@@ -833,6 +833,141 @@ EXPECTED_TOOLS = [
         }
     },
     {
+        "name": "render_reference_comparison_as_image",
+        "description": "\n"
+        "Compare the mesh object *name* with a reference image of the subject, returned as a JPEG image.\n"
+        "\n"
+        "Use to check a model's shape against a photo or drawing: the widths along each part,\n"
+        "how parts join the body, the shape of the head. The model is drawn after modifiers,\n"
+        "with its visible mesh children (e.g. eyes), in an orthographic *view* in object space\n"
+        "(``FRONT``, ``BACK``, ``RIGHT``, ``LEFT``, ``TOP``, ``BOTTOM`` as in Blender's numpad\n"
+        "views), scaled and placed onto the subject in the reference.\n"
+        "\n"
+        "The image has two panels at the same scale and region: the reference with the model's\n"
+        "outline (yellow) on it, and the shaded model. Pick the reference taken most straight\n"
+        "on from the view's side: references are usually in perspective, so expect small\n"
+        "differences, mostly in the parts closest to and furthest from the camera.\n"
+        "\n"
+        "*image_path* is the absolute path of the reference (PNG, JPEG...), read from disk.\n"
+        "*subject_box* is the subject's box in it, ``[left, top, right, bottom]`` in pixels\n"
+        "from the top left of the image. It may be left out for a reference with a transparent\n"
+        "background: the box is then taken from the opaque pixels.\n"
+        "\n"
+        "*fit* picks the size matched between the model and the subject: ``HEIGHT`` (default)\n"
+        "or ``WIDTH``, e.g. for a subject lying down. Their centers are aligned.\n"
+        "\n"
+        "*bounds_min* & *bounds_max* (object space, pass both) limit the model to a box, to\n"
+        "compare a part (e.g. the head) with a *subject_box* around the same part.\n"
+        "\n"
+        "With a transparent background, the subject's opaque pixels are compared with the\n"
+        "model: the reference panel colors the parts only in the model (red) and only in the\n"
+        "reference (blue), the model panel shows the reference's outline (cyan).\n"
+        "\n"
+        "Returns the image followed by JSON info: ``panels`` (``rect`` in the image: x, y from\n"
+        "the bottom left, width, height), ``right`` & ``up`` (the screen axes),\n"
+        "``units_per_pixel``, ``objects`` drawn, ``subject_box`` used,\n"
+        "``units_per_reference_pixel``, ``model_size`` & ``subject_size`` (width and height\n"
+        "on the screen axes, in object units) and ``size_ratio`` (model / subject, the\n"
+        "fitted one is 1). With a transparent background also: ``overlap`` (intersection over\n"
+        "union), ``model_only`` & ``reference_only`` (fractions of the subject's area), and\n"
+        "``rows`` (top down) & ``columns`` (left to right): both silhouettes split in 10 bands,\n"
+        "each with its ``range`` along the ``up`` or ``right`` axis in object coordinates and\n"
+        "its ``model_only`` & ``reference_only`` parts.\n"
+        "\n"
+        "*size_limit_in_bytes* is the target image size in bytes.\n"
+        "Zero (the default) uses the MCP message size limit.\n",
+        "inputSchema": {
+            "properties": {
+                "name": {
+                    "title": "Name",
+                    "type": "string"
+                },
+                "image_path": {
+                    "title": "Image Path",
+                    "type": "string"
+                },
+                "view": {
+                    "enum": [
+                        "FRONT",
+                        "BACK",
+                        "RIGHT",
+                        "LEFT",
+                        "TOP",
+                        "BOTTOM"
+                    ],
+                    "title": "View",
+                    "type": "string"
+                },
+                "subject_box": {
+                    "anyOf": [
+                        {
+                            "items": {
+                                "type": "number"
+                            },
+                            "type": "array"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": None,
+                    "title": "Subject Box"
+                },
+                "fit": {
+                    "default": "HEIGHT",
+                    "enum": [
+                        "HEIGHT",
+                        "WIDTH"
+                    ],
+                    "title": "Fit",
+                    "type": "string"
+                },
+                "bounds_min": {
+                    "anyOf": [
+                        {
+                            "items": {
+                                "type": "number"
+                            },
+                            "type": "array"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": None,
+                    "title": "Bounds Min"
+                },
+                "bounds_max": {
+                    "anyOf": [
+                        {
+                            "items": {
+                                "type": "number"
+                            },
+                            "type": "array"
+                        },
+                        {
+                            "type": "null"
+                        }
+                    ],
+                    "default": None,
+                    "title": "Bounds Max"
+                },
+                "size_limit_in_bytes": {
+                    "default": 0,
+                    "title": "Size Limit In Bytes",
+                    "type": "integer"
+                }
+            },
+            "required": [
+                "name",
+                "image_path",
+                "view"
+            ],
+            "type": "object",
+            "title": "render_reference_comparison_as_imageArguments"
+        }
+    },
+    {
         "name": "render_thumbnail_as_image",
         "description": "\n"
         "Render a small, low-quality thumbnail and return it as a PNG image (temporarily overrides settings).\n"

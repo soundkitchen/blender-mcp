@@ -110,6 +110,10 @@ The tools exposed by the MCP server.
    Draw the mesh object *name* in orthographic views with its vertex
    indices, returned as a PNG image.
 
+``render_reference_comparison_as_image``
+   Compare the mesh object *name* with a reference image of the subject,
+   returned as a JPEG image.
+
 ``render_thumbnail_as_image``
    Render a small, low-quality thumbnail and return it as a PNG image
    (temporarily overrides settings).

@@ -40,6 +40,7 @@ import textwrap
 import threading
 import time
 import unittest
+import zlib
 
 import sys
 
@@ -86,6 +87,40 @@ def _print_untested_tools() -> None:
 
 
 atexit.register(_print_untested_tools)
+
+
+def _write_png_with_rect(
+        filepath: str,
+        size: tuple[int, int],
+        rect: tuple[int, int, int, int],
+        has_alpha: bool,
+) -> None:
+    """
+    Write a PNG of *size* with an opaque orange *rect* (left, top, right, bottom from the top left)
+    on a transparent background (*has_alpha*) or a white one.
+    """
+    width, height = size
+    left, top, right, bottom = rect
+    channels = 4 if has_alpha else 3
+    background = bytes(channels) if has_alpha else b"\xff" * channels
+    subject = bytes((200, 120, 60, 255)[:channels])
+    rows = []
+    for y in range(height):
+        inside = top <= y < bottom
+        rows.append(b"\x00" + b"".join(
+            subject if inside and left <= x < right else background for x in range(width)
+        ))
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        return struct.pack(">I", len(data)) + kind + data + struct.pack(">I", zlib.crc32(kind + data) & 0xffffffff)
+
+    with open(filepath, "wb") as fh:
+        fh.write(
+            b"\x89PNG\r\n\x1a\n" +
+            chunk(b"IHDR", struct.pack(">IIBBBBB", width, height, 8, 6 if has_alpha else 2, 0, 0, 0)) +
+            chunk(b"IDAT", zlib.compress(b"".join(rows))) +
+            chunk(b"IEND", b"")
+        )
 
 
 def _python_fn_body_as_string(fn: object) -> str:
@@ -568,12 +603,25 @@ class _TestServerMixin:
 
     @staticmethod
     def _image_size(image_base64: str) -> tuple[int, int]:
-        """Return (width, height) of a base64-encoded PNG by reading the IHDR chunk."""
+        """
+        Return (width, height) of a base64-encoded PNG (from the IHDR chunk)
+        or JPEG (from the start of frame marker).
+        """
         data = base64.b64decode(image_base64)
-        if data[:8] != b"\x89PNG\r\n\x1a\n":
-            return (-1, -1)
-        width, height = struct.unpack(">II", data[16:24])
-        return (width, height)
+        if data[:8] == b"\x89PNG\r\n\x1a\n":
+            width, height = struct.unpack(">II", data[16:24])
+            return (width, height)
+        if data[:2] == b"\xff\xd8":
+            i = 2
+            while i + 9 < len(data) and data[i] == 0xFF:
+                marker = data[i + 1]
+                length = struct.unpack(">H", data[i + 2:i + 4])[0]
+                # Start of frame markers (except DHT, JPG & DAC).
+                if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
+                    height, width = struct.unpack(">HH", data[i + 5:i + 9])
+                    return (width, height)
+                i += 2 + length
+        return (-1, -1)
 
     def test_get_screenshot_of_area_as_image(self) -> None:
         self._call_tool_screenshot("get_screenshot_of_area_as_image", {
@@ -1733,6 +1781,168 @@ class _TestServerMixin:
                 ({"name": "Cube", "bounds_min": [0.0, 0.0], "bounds_max": [1.0, 1.0, 1.0]}, "3 finite numbers"),
         ):
             content = self._call_tool_expect_error("render_mesh_wireframe_as_image", arguments)
+            self.assertIn(message, str(content[0].get("text", "")))
+
+    def _call_tool_reference_comparison(self, arguments: dict[str, object]) -> dict[str, object]:
+        """
+        Call ``render_reference_comparison_as_image``, check the image and return the info.
+        """
+        content = self._call_tool("render_reference_comparison_as_image", arguments)
+        self.assertEqual(len(content), 2)
+        self.assertEqual(content[0].get("type"), "image")
+        self.assertEqual(content[0].get("mimeType"), "image/jpeg")
+        self.assertEqual(content[1].get("type"), "text")
+        info = json.loads(str(content[1]["text"]))
+        self.assertEqual(
+            self._image_size(str(content[0]["data"])),
+            (info["image_width"], info["image_height"]),
+        )
+        return info
+
+    def _reference_path(self, name: str, rect: tuple[int, int, int, int], has_alpha: bool) -> str:
+        """
+        Write a 200 x 100 reference image with an opaque *rect*, return its path.
+        """
+        filepath = os.path.join(self._tmpdir.name, name)
+        _write_png_with_rect(filepath, (200, 100), rect, has_alpha)
+        return filepath
+
+    def test_render_reference_comparison_as_image(self) -> None:
+        # The default cube seen from the front is a square, like the opaque square of the reference.
+        image_path = self._reference_path("square.png", (60, 10, 140, 90), has_alpha=True)
+        info = self._call_tool_reference_comparison({"name": "Cube", "image_path": image_path, "view": "FRONT"})
+        self.assertEqual((info["right"], info["up"]), ("+X", "+Z"))
+        reference, model = info["panels"]
+        self.assertEqual((reference["content"], model["content"]), ("reference", "model"))
+        # Panels are side by side and fill the image width.
+        self.assertEqual(reference["rect"][0] + reference["rect"][2], model["rect"][0])
+        self.assertEqual(model["rect"][0] + model["rect"][2], info["image_width"])
+        self.assertEqual(info["objects"], ["Cube"])
+        self.assertEqual(info["reference_size"], [200, 100])
+        self.assertTrue(info["reference_has_alpha"])
+        self.assertTrue(info["subject_box_from_alpha"])
+        self.assertEqual(info["subject_box"], [60, 10, 140, 90])
+        self.assertEqual(info["fit"], "HEIGHT")
+        for size in (info["model_size"], info["subject_size"]):
+            self.assertAlmostEqual(size[0], 2.0, delta=0.01)
+            self.assertAlmostEqual(size[1], 2.0, delta=0.01)
+        self.assertAlmostEqual(info["units_per_reference_pixel"], 2.0 / 80, delta=1e-4)
+        self.assertGreater(info["overlap"], 0.97)
+        self.assertLess(info["model_only"], 0.02)
+        self.assertLess(info["reference_only"], 0.02)
+        # Bands: rows from the top down along Z, columns from the left to the right along X.
+        self.assertEqual(len(info["rows"]), 10)
+        self.assertEqual(len(info["columns"]), 10)
+        self.assertAlmostEqual(info["rows"][0]["range"][1], 1.0, delta=0.02)
+        self.assertAlmostEqual(info["rows"][-1]["range"][0], -1.0, delta=0.02)
+        self.assertAlmostEqual(info["columns"][0]["range"][0], -1.0, delta=0.02)
+        self.assertAlmostEqual(info["columns"][-1]["range"][1], 1.0, delta=0.02)
+
+    def test_render_reference_comparison_as_image_fit(self) -> None:
+        # A reference twice as wide as the cube.
+        image_path = self._reference_path("wide.png", (40, 20, 160, 80), has_alpha=True)
+        info = self._call_tool_reference_comparison({"name": "Cube", "image_path": image_path, "view": "FRONT"})
+        # Fitted by the height: the model is half as wide as the subject, centered.
+        self.assertAlmostEqual(info["size_ratio"][0], 0.5, delta=0.01)
+        self.assertEqual(info["size_ratio"][1], 1.0)
+        self.assertLess(info["model_only"], 0.02)
+        self.assertAlmostEqual(info["reference_only"], 0.5, delta=0.02)
+        columns = info["columns"]
+        self.assertGreater(columns[0]["reference_only"], 0.05)
+        self.assertGreater(columns[-1]["reference_only"], 0.05)
+        self.assertLess(columns[4]["reference_only"], 0.01)
+        self.assertAlmostEqual(sum(row["reference_only"] for row in info["rows"]), info["reference_only"], delta=0.01)
+
+        info = self._call_tool_reference_comparison({
+            "name": "Cube", "image_path": image_path, "view": "FRONT", "fit": "WIDTH",
+        })
+        self.assertEqual(info["size_ratio"][0], 1.0)
+        self.assertAlmostEqual(info["size_ratio"][1], 2.0, delta=0.02)
+        self.assertGreater(info["model_only"], 0.9)
+
+    def test_render_reference_comparison_as_image_subject_box(self) -> None:
+        # Without transparency, the subject box is required and nothing is measured.
+        image_path = self._reference_path("white.png", (60, 10, 140, 90), has_alpha=False)
+        info = self._call_tool_reference_comparison({
+            "name": "Cube", "image_path": image_path, "view": "RIGHT", "subject_box": [60, 10, 140, 90],
+        })
+        self.assertEqual((info["right"], info["up"]), ("+Y", "+Z"))
+        self.assertFalse(info["reference_has_alpha"])
+        self.assertFalse(info["subject_box_from_alpha"])
+        self.assertEqual(info["size_ratio"], [1.0, 1.0])
+        for key in ("overlap", "model_only", "reference_only", "rows", "columns"):
+            self.assertNotIn(key, info)
+
+        content = self._call_tool_expect_error("render_reference_comparison_as_image", {
+            "name": "Cube", "image_path": image_path, "view": "FRONT",
+        })
+        self.assertIn("Pass subject_box", str(content[0].get("text", "")))
+
+    def test_render_reference_comparison_as_image_bounds(self) -> None:
+        # The top half of the cube against the whole square: fitted by the height,
+        # the model is twice as wide as the subject.
+        image_path = self._reference_path("square.png", (60, 10, 140, 90), has_alpha=True)
+        info = self._call_tool_reference_comparison({
+            "name": "Cube",
+            "image_path": image_path,
+            "view": "FRONT",
+            "bounds_min": [-1.5, -1.5, 0.0],
+            "bounds_max": [1.5, 1.5, 1.5],
+        })
+        self.assertAlmostEqual(info["model_size"][0], 2.0, delta=0.01)
+        self.assertAlmostEqual(info["model_size"][1], 1.0, delta=0.01)
+        self.assertAlmostEqual(info["size_ratio"][0], 2.0, delta=0.02)
+        self.assertEqual(info["bounds_min"], [-1.5, -1.5, 0.0])
+
+        content = self._call_tool_expect_error("render_reference_comparison_as_image", {
+            "name": "Cube",
+            "image_path": image_path,
+            "view": "FRONT",
+            "bounds_min": [-1.5, -1.5, 2.0],
+            "bounds_max": [1.5, 1.5, 3.0],
+        })
+        self.assertIn("within the bounds", str(content[0].get("text", "")))
+
+    def test_render_reference_comparison_as_image_children(self) -> None:
+        def code() -> None:
+            import bpy  # type: ignore[import-not-found]
+            # A small cube to the right of the default cube, as its child.
+            bpy.ops.mesh.primitive_cube_add(size=0.5, location=(2.0, 0.0, 0.0))
+            child = bpy.context.object
+            child.name = "Child"
+            child.parent = bpy.data.objects["Cube"]
+            result = {'ok': True}  # noqa: F841
+        self._test_tool("execute_blender_code", {"code": _python_fn_body_as_string(code)})
+        image_path = self._reference_path("square.png", (60, 10, 140, 90), has_alpha=True)
+        info = self._call_tool_reference_comparison({"name": "Cube", "image_path": image_path, "view": "FRONT"})
+        self.assertEqual(info["objects"], ["Cube", "Child"])
+        self.assertAlmostEqual(info["model_size"][0], 3.25, delta=0.02)
+
+    def test_render_reference_comparison_as_image_downscaled(self) -> None:
+        image_path = self._reference_path("square.png", (60, 10, 140, 90), has_alpha=True)
+        arguments: dict[str, object] = {"name": "Cube", "image_path": image_path, "view": "FRONT"}
+        full = self._call_tool_reference_comparison(arguments)
+        small = self._call_tool_reference_comparison({**arguments, "size_limit_in_bytes": 8000})
+        self.assertLess(small["image_width"], full["image_width"])
+        scale = small["image_width"] / full["image_width"]
+        self.assertAlmostEqual(small["units_per_pixel"], full["units_per_pixel"] / scale, delta=1e-4)
+        model = small["panels"][-1]["rect"]
+        self.assertLessEqual(abs(model[0] + model[2] - small["image_width"]), 1)
+
+    def test_render_reference_comparison_as_image_error(self) -> None:
+        image_path = self._reference_path("square.png", (60, 10, 140, 90), has_alpha=True)
+        for arguments, message in (
+                ({"name": "Light"}, "not a mesh"),
+                ({"name": "NonExistent"}, "'NonExistent' not found"),
+                ({"image_path": "square.png"}, "must be an absolute path"),
+                ({"image_path": image_path + ".missing"}, "Image not found"),
+                ({"subject_box": [140, 10, 60, 90]}, "right > left"),
+                ({"subject_box": [300, 10, 400, 90]}, "outside the image"),
+                ({"bounds_min": [0.0, 0.0, 0.0]}, "Pass both bounds_min and bounds_max"),
+        ):
+            content = self._call_tool_expect_error("render_reference_comparison_as_image", {
+                "name": "Cube", "image_path": image_path, "view": "FRONT", **arguments,
+            })
             self.assertIn(message, str(content[0].get("text", "")))
 
     def test_blmcp_subd_helpers(self) -> None:
