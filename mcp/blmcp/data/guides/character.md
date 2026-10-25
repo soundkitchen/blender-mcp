@@ -48,7 +48,10 @@ or foot has and where they point, how wide a part is at its base).
      on the long side) and tile them into one image with your own tools, in the same
      temporary directory. The sheet gives the overview and is cheap to open again later, but
      it is too small for shapes: open the photos themselves to list the features and to
-     compare.
+     compare (scaled down to e.g. 1024 pixels, or cropped to a part). The sheet counts as one
+     image in the *Image budget* below. Without a tool that scales and tiles images, skip the
+     sheet and open the photos one by one, rather than installing software for it or using
+     `execute_blender_code`.
    * If you can't view images, tell the user and ask for references or a description
      rather than guessing.
 2. **List the features** from the references, before modeling. Pick one unit for all the
@@ -76,9 +79,11 @@ or foot has and where they point, how wide a part is at its base).
    a start, the shape comes from these rounds of comparing and fixing.
    * Write each round down as a table: every listed item, its value on the references, on
      the model, and the change you make. Change the shape and compare again, until every
-     item matches. Report the last table, with the items you left and why.
-   * Open the photos again before comparing (the contact sheet to pick them), rather than
-     relying on what you remember of them.
+     item matches or a round no longer improves any: then stop, and report the last table
+     with the items left and why (e.g. not measurable on the photos).
+   * Open again the photos of the parts the round compares (the contact sheet to pick them),
+     rather than relying on what you remember of them: only those, so the round stays within
+     the *Image budget*.
    * Look at a photo and the model from about the same angle together, part by part: the
      width along each part, the shape of its end, how it joins the body.
    * Match the views: a side photo with `RIGHT` or `LEFT`, a front photo with `FRONT` of
@@ -102,13 +107,15 @@ or foot has and where they point, how wide a part is at its base).
 **Image budget.** A conversation can hold only so many images: past a limit on their number
 or total size, the client may drop the oldest ones from what you see, e.g. replacing them
 with a text such as `[media removed: request limit]`. The references, viewed first, are the
-first to go, while every check image adds up (about 1 MB each at the default size).
+first to go, while every check image adds up (at the default size, a few hundred KB each and
+up to about 1 MB).
 
 * Pass `size_limit_in_bytes` (e.g. `200000`) to the image tools for checks, and take only
-  the views you need.
+  the views you need. Keep the default for `render_mesh_wireframe_as_image` when you read
+  its vertex labels: a smaller image makes them unreadable.
 * An image replaced this way was seen and later dropped, not unreadable: open the file
-  again when you need it (newly opened images are kept), and don't report it as never
-  seen.
+  again when you need it, and don't report it as never seen. It shows right after opening,
+  and may be dropped again later as new images add up.
 
 The *Steps* and the *Example* below build a human. For another subject (an animal, a
 creature), keep the approach (rings, extrusions, roles), but take the parts, how many there
@@ -219,7 +226,7 @@ if tried.users == 0:
    (`subd.insert_loop`, then `subd.scale_loop`), move broad areas with `subd.move_smooth`
    and sharpen edges with `subd.set_crease` (see *Helpers*).
 8. **Compare with the references**, item by item in a table (see *References*), fix what
-   differs and compare again, until the items match.
+   differs and compare again, until the items match or stop improving.
 9. **Ground contact.** Subdivision shrinks the shape: check the lowest point after modifiers
    (`bounds_world` of `get_object_geometry_summary`) and move the cage so it touches the
    ground or its support, see *Ground contact* below. Check it again after changing the shape.
