@@ -1683,6 +1683,7 @@ class _TestServerMixin:
         The ``blmcp_subd`` helpers on a half tube, open on the mirror plane.
         """
         def code() -> None:
+            import bmesh  # type: ignore[import-not-found]
             import bpy  # type: ignore[import-not-found]
             import blmcp_subd as subd  # type: ignore[import-not-found]
 
@@ -1758,8 +1759,33 @@ class _TestServerMixin:
             small.data.from_pydata([(0.0, 0.0, 0.0), (0.03, 0.0, 0.0), (0.03, 0.0, 0.17)], [], [(0, 1, 2)])
             result["merge_small"] = subd.setup_mirror_subsurf(small)["merge_threshold"]
             result["merge_given"] = subd.setup_mirror_subsurf(small, merge_threshold=0.0002)["merge_threshold"]
+            # A value set on a reused Mirror is kept, Blender's default is replaced.
+            result["merge_kept"] = subd.setup_mirror_subsurf(small, levels=3)["merge_threshold"]
+            small.modifiers[0].merge_threshold = 0.001
+            result["merge_default"] = subd.setup_mirror_subsurf(small)["merge_threshold"]
+            try:
+                subd.setup_mirror_subsurf(small, merge_threshold=0.0)
+            except ValueError as ex:
+                result["merge_zero"] = str(ex)
             result["merge_empty"] = subd.setup_mirror_subsurf(
                 bpy.data.objects.new("EmptyCage", bpy.data.meshes.new("EmptyCage")))["merge_threshold"]
+            # A Mirror on Y too: Y is measured with its mirrored copy (0.06 wide).
+            wide = bpy.data.objects.new("WideCage", bpy.data.meshes.new("WideCage"))
+            wide.data.from_pydata([(0.0, 0.0, 0.0), (0.01, 0.03, 0.0), (0.0, 0.03, 0.01)], [], [(0, 1, 2)])
+            wide.modifiers.new("Mirror", 'MIRROR').use_axis = (True, True, False)
+            result["merge_y"] = subd.setup_mirror_subsurf(wide)["merge_threshold"]
+            # In Edit Mode, the edit-mesh's vertices are measured.
+            bpy.context.collection.objects.link(small)
+            bpy.context.view_layer.objects.active = small
+            small.modifiers.clear()
+            bpy.ops.object.mode_set(mode='EDIT')
+            try:
+                bm = bmesh.from_edit_mesh(small.data)
+                for v in bm.verts:
+                    v.co *= 0.5
+                result["merge_edit"] = subd.setup_mirror_subsurf(small)["merge_threshold"]
+            finally:
+                bpy.ops.object.mode_set(mode='OBJECT')
 
         data = self._test_tool("execute_blender_code", {"code": _python_fn_body_as_string(code)})
         self.assertEqual(data["extrude_sources"], [0, 1, 2, 3])
@@ -1784,6 +1810,11 @@ class _TestServerMixin:
         self.assertAlmostEqual(data["modifiers"]["merge_threshold"], 0.001)
         self.assertAlmostEqual(data["merge_small"], 0.00017)
         self.assertAlmostEqual(data["merge_given"], 0.0002)
+        self.assertAlmostEqual(data["merge_kept"], 0.0002)
+        self.assertAlmostEqual(data["merge_default"], 0.00017)
+        self.assertIn("merge_threshold must be more than 0", data["merge_zero"])
+        self.assertAlmostEqual(data["merge_y"], 0.00006)
+        self.assertAlmostEqual(data["merge_edit"], 0.000085)
         self.assertAlmostEqual(data["merge_empty"], 0.001)
         self.assertEqual(data["mirror"], [[True, True, False], True, True])
         self.assertEqual(data["levels"], 3)
@@ -2032,13 +2063,13 @@ class _TestServerMixin:
         self.assertEqual(data["creases"], [1.0, 1.0, 0.0])
         self.assertEqual(data["mesh_crease"], 0.5)
         # The -X side (9 vertices) is removed, the middle ring (8 vertices) is moved onto the plane.
-        self.assertEqual(data["make_half"], {"removed_vertices": 9, "snapped_vertices": 8})
+        self.assertEqual(data["make_half"], {"removed_vertices": 9, "snapped_vertices": 8, "tolerance": 0.001})
         self.assertEqual(data["half"]["min_x"], 0.0)
         self.assertEqual(data["half"]["sides"], [4])
         self.assertTrue(data["half"]["boundary_on_plane"])
         self.assertEqual(data["half"]["wire_edges"], 0)
         # The -X side (16 + 12 vertices) and the -X end of the wire edge across the plane.
-        self.assertEqual(data["make_half_cut"], {"removed_vertices": 29, "snapped_vertices": 0})
+        self.assertEqual(data["make_half_cut"], {"removed_vertices": 29, "snapped_vertices": 0, "tolerance": 0.001})
         self.assertEqual(data["half_cut"]["min_x"], 0.0)
         self.assertEqual(data["half_cut"]["wire_edges"], [[0.0, 1.0], [2.0, 3.0]])
         self.assertEqual(data["symmetrize"], [[-1.0, 2.0], [0.0, 1.5], [1.0, 2.0]])

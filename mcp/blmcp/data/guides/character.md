@@ -88,15 +88,18 @@ the selection or the mode:
   doesn't follow. Include the whole part beyond the moved vertices (e.g. the hand when
   lowering the wrist): otherwise it only follows partly and bends at the moved vertices.
 * `subd.set_crease(bm, edges, value)`: subdivision crease, from 0 (smooth) to 1 (sharp edge).
-* `subd.make_half(bm, tolerance=0.001)`: cuts a whole mesh at `X = 0` into a half cage (open
-  on the plane), moving the vertices within `tolerance` onto it. Also fixes
-  `off_center_vertices` of a half cage, with a `tolerance` above their distance.
+* `subd.make_half(bm, tolerance=None)`: cuts a whole mesh at `X = 0` into a half cage (open
+  on the plane), moving the vertices within `tolerance` onto it (by default, from the mesh's
+  size as below). Also fixes `off_center_vertices` of a half cage, with a `tolerance` above
+  their distance.
 * `subd.symmetrize(bm, source='+X')`: copies one side of a whole mesh (without a Mirror
   modifier) onto the other.
 * `subd.setup_mirror_subsurf(obj, levels=2)`: the Mirror (merge, clipping) then Subdivision
   Surface modifiers, reusing and reordering existing ones. Call it once the cage is built:
-  the merge distance follows the cage's size (1 mm for a human, 0.17 mm for a 17 cm bird).
-  For a small model, lower the `tolerance` of `make_half` and `symmetrize` (1 mm) too.
+  a new Mirror's merge distance follows the cage's size: 1/1000 of it, at most 1 mm (1 mm for
+  a human, 0.17 mm for a 17 cm bird, in the object's local units). A Mirror you set yourself
+  keeps its value. Then check `off_center_vertices`: vertices just off the plane, no longer
+  merged with a smaller distance, leave the seam open; move them onto it with `make_half`.
 
 `scale_loop` and `move_smooth` keep the vertices on the mirror plane on it, for a half cage
 under a Mirror modifier: pass `mirror=False` for a whole mesh (e.g. after `symmetrize`).
