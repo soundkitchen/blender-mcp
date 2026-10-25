@@ -19,7 +19,7 @@ Subdivision Surface modifier gives smooth, editable shapes.
 The Skin modifier (a vertex/edge skeleton with radii) is a quick alternative, but at
 branches (chest to shoulders, pelvis to legs) it often makes separate parts, poles with
 8 edges and triangles that need manual repair. If you use it, check `islands` right after
-converting it to a mesh.
+converting it to a mesh, and cut the whole mesh to a half cage with `subd.make_half`.
 
 ## Helpers
 
@@ -28,7 +28,8 @@ Unlike `bpy.ops.mesh` operators (e.g. `loopcut_slide`), they don't depend on the
 the selection or the mode:
 
 * `subd.edit_mesh(obj)`: `with subd.edit_mesh(obj) as bm:` gives the mesh as a `bmesh` and
-  writes it back at the end, in Object Mode and Edit Mode.
+  writes it back at the end, in Object Mode and Edit Mode. It adds the edge crease attribute
+  (all 0) when missing, for `set_crease`.
 * `subd.extrude(bm, faces)`: extrudes the faces as one region, removes the original faces and
   the faces left on the mirror plane. Returns the new `faces` and `source`, mapping each new
   vertex to the vertex it came from.
@@ -36,8 +37,24 @@ the selection or the mode:
 * `subd.insert_loop(bm, edge, cuts=1)`: inserts edge loops across that ring, returns the new
   vertices (one list per loop, following the ring).
 * `subd.bridge_loops(bm, loop_a, loop_b)`: joins two rows of vertices with quads.
+* `subd.scale_loop(verts, scale, center=None)`: scales vertices (e.g. a new loop) per axis
+  around their center. A half ring on the mirror plane scales around `X = 0` and stays on it.
+* `subd.move_smooth(bm, verts, offset, radius)`: moves vertices, the vertices around them
+  follow less and less up to `radius` (proportional editing). The distance is measured along
+  the edges by default, so a nearby part that isn't joined (e.g. the torso next to an arm)
+  doesn't follow. Include the whole part beyond the moved vertices (e.g. the hand when
+  lowering the wrist): otherwise it only follows partly and bends at the moved vertices.
+* `subd.set_crease(bm, edges, value)`: subdivision crease, from 0 (smooth) to 1 (sharp edge).
+* `subd.make_half(bm, tolerance=0.001)`: cuts a whole mesh at `X = 0` into a half cage (open
+  on the plane), moving the vertices within `tolerance` onto it. Also fixes
+  `off_center_vertices` of a half cage, with a `tolerance` above their distance.
+* `subd.symmetrize(bm, source='+X')`: copies one side of a whole mesh (without a Mirror
+  modifier) onto the other.
 * `subd.setup_mirror_subsurf(obj, levels=2)`: the Mirror (merge, clipping) then Subdivision
   Surface modifiers, reusing and reordering existing ones.
+
+`scale_loop` and `move_smooth` keep the vertices on the mirror plane on it, for a half cage
+under a Mirror modifier: pass `mirror=False` for a whole mesh (e.g. after `symmetrize`).
 
 Their docstrings (`help(subd.extrude)`) have the details. For example, to add a loop around
 the waist and widen it. Pick the edge by the indices of its two vertices, as shown by
@@ -56,10 +73,24 @@ with subd.edit_mesh(obj) as bm:
     if edge is None:
         raise ValueError("Vertices 8 and 14 are not joined by an edge")
     (loop,) = subd.insert_loop(bm, edge)
-    for v in loop:
-        v.co.x *= 1.1
+    subd.scale_loop(loop, (1.1, 1.0, 1.0))  # Wider, around X = 0 for this half ring.
     # Read the indices inside the block: the bmesh is freed at its end.
     result = {"loop": [v.index for v in loop]}
+```
+
+To try a change and go back, copy the mesh first (in Object Mode) instead of restoring
+positions by hand:
+
+```python
+backup = obj.data.copy()  # Before the change, keep it until the result is checked.
+# Undo: put the copy back and remove the changed mesh, unless other objects use it.
+tried = obj.data
+name = tried.name
+obj.data = backup
+if tried.users == 0:
+    bpy.data.meshes.remove(tried)
+    backup.name = name
+# Or keep the change: bpy.data.meshes.remove(backup)
 ```
 
 ## Steps
@@ -77,7 +108,8 @@ with subd.edit_mesh(obj) as bm:
 5. **Neck and head.** Extrude the inner top face up: neck, jaw, widest part of the skull, top.
 6. **Shape.** Move vertices by index with `render_mesh_wireframe_as_image` (zoom in with
    `bounds_min`/`bounds_max`), add edge loops where a shape needs more detail
-   (`subd.insert_loop`, see *Helpers*).
+   (`subd.insert_loop`, then `subd.scale_loop`), move broad areas with `subd.move_smooth`
+   and sharpen edges with `subd.set_crease` (see *Helpers*).
 7. **Ground contact.** Subdivision shrinks the shape: check the lowest point after modifiers
    (`bounds_world` of `get_object_geometry_summary`) and move the cage so it touches the
    ground, see *Ground contact* below.
@@ -163,7 +195,7 @@ import blmcp_subd as subd
 
 NAME = "Character"    # Check the name is free: Blender appends ".001" on a collision.
 HEIGHT = 1.7          # Meters, the proportions below are for 1.7 and scaled to this.
-LOCATION = (0.0, 0.0, 0.0)
+LOCATION = (0.0, 0.0, 0.0)  # Pick a free spot, away from the objects already in the scene.
 
 S = HEIGHT / 1.7
 bm = bmesh.new()

@@ -1886,6 +1886,151 @@ class _TestServerMixin:
         self.assertEqual(data["diagonal_loop_x"], [0.0, 1.0, 1.0, 0.0])
         self.assertIn("no length", data["zero_length_error"])
 
+    def test_blmcp_subd_shaping(self) -> None:
+        """
+        The ``blmcp_subd`` helpers that shape and clean up a cage.
+        """
+        def code() -> None:
+            import bmesh  # type: ignore[import-not-found]
+            import bpy  # type: ignore[import-not-found]
+            import blmcp_subd as subd  # type: ignore[import-not-found]
+
+            def half_tube(bm, zs, x=0.0):  # type: ignore[no-untyped-def]
+                pts = [(0.0, -1.0), (1.0, -1.0), (1.0, 1.0), (0.0, 1.0)]
+                rings = [[bm.verts.new((px + x, y, z)) for px, y in pts] for z in zs]
+                for a, b in zip(rings, rings[1:]):
+                    for k in range(3):
+                        bm.faces.new((a[k], a[k + 1], b[k + 1], b[k]))
+                return rings
+
+            result = {}
+            # scale_loop: a half ring on the mirror plane scales around X = 0 and stays on it,
+            # other vertices around their average.
+            bm = bmesh.new()
+            rings = half_tube(bm, (0.0, 1.0, 2.0))
+            result["half_ring_center"] = subd.scale_loop(rings[1], (2.0, 0.5, 1.0))
+            result["half_ring"] = [tuple(v.co) for v in rings[1]]
+            result["side_center"] = subd.scale_loop(rings[2][1:3], 2.0)
+            # Without `mirror` (a whole mesh), the vertices on X = 0 are like the others.
+            result["whole_center"] = subd.scale_loop(rings[0], (2.0, 1.0, 1.0), mirror=False)
+            result["whole_ring_x"] = [v.co.x for v in rings[0]]
+            weights = subd.move_smooth(bm, rings[2], (1.0, 0.0, 0.0), radius=0.5, mirror=False)
+            result["whole_moved_x"] = sorted(v.co.x for v in weights)
+            bm.free()
+
+            # move_smooth: along the edges only the tube follows, in a straight line also the
+            # separate tube nearby. Vertices on the mirror plane stay on it.
+            for connected in (True, False):
+                bm = bmesh.new()
+                tube = half_tube(bm, (0.0, 1.0, 2.0, 3.0))
+                other = half_tube(bm, (3.0, 4.0), x=1.5)
+                weights = subd.move_smooth(
+                    bm, [tube[3][1], tube[3][2]], (0.0, 0.0, 1.0), radius=1.5, connected=connected)
+                result["move_{:d}".format(connected)] = {
+                    "moved_z": round(tube[3][1].co.z, 3),
+                    "ring_below_z": round(tube[2][1].co.z, 3),
+                    "plane_x": [tube[3][0].co.x, tube[2][0].co.x],
+                    "other_follows": any(v in weights for ring in other for v in ring),
+                }
+                bm.free()
+
+            # set_crease: on a bmesh without the attribute, the given edges are still set.
+            bm = bmesh.new()
+            half_tube(bm, (0.0, 1.0))
+            bm.edges.ensure_lookup_table()
+            subd.set_crease(bm, [bm.edges[0], bm.edges[1]], 1.0)
+            layer = bm.edges.layers.float["crease_edge"]
+            bm.edges.ensure_lookup_table()
+            result["creases"] = [bm.edges[i][layer] for i in range(3)]
+            bm.free()
+            # With `edit_mesh`, the crease is written to the mesh.
+            mesh = bpy.data.meshes.new("Creased")
+            obj = bpy.data.objects.new("Creased", mesh)
+            bpy.context.collection.objects.link(obj)
+            with subd.edit_mesh(obj) as bm:
+                half_tube(bm, (0.0, 1.0))
+                bm.edges.ensure_lookup_table()
+                subd.set_crease(bm, [bm.edges[0]], 0.5)
+            result["mesh_crease"] = mesh.edge_creases.data[0].value
+
+            # make_half: a whole cube (2x2 per side) with its middle vertices just off X = 0.
+            bm = bmesh.new()
+            bmesh.ops.create_cube(bm, size=2.0)
+            bmesh.ops.subdivide_edges(bm, edges=bm.edges[:], cuts=1, use_grid_fill=True)
+            for v in bm.verts:
+                v.co.x += 0.0003
+            result["make_half"] = subd.make_half(bm)
+            result["half"] = {
+                "min_x": min(v.co.x for v in bm.verts),
+                "faces": len(bm.faces),
+                "sides": sorted({len(f.verts) for f in bm.faces}),
+                "boundary_on_plane": all(
+                    _v.co.x == 0.0 for e in bm.edges if e.is_boundary for _v in e.verts),
+                "wire_edges": sum(1 for e in bm.edges if not e.link_faces),
+            }
+            bm.free()
+            # Cut through faces (3x3 per side, no vertices near X = 0): the vertices made by the
+            # cut are not counted. Wire edges of the mesh stay: one on +X, one across the plane.
+            bm = bmesh.new()
+            bmesh.ops.create_cube(bm, size=2.0)
+            bmesh.ops.subdivide_edges(bm, edges=bm.edges[:], cuts=2, use_grid_fill=True)
+            bm.edges.new((bm.verts.new((2.0, 0.0, 0.0)), bm.verts.new((3.0, 0.0, 0.0))))
+            bm.edges.new((bm.verts.new((-1.0, 5.0, 0.0)), bm.verts.new((1.0, 5.0, 0.0))))
+            result["make_half_cut"] = subd.make_half(bm)
+            result["half_cut"] = {
+                "min_x": min(v.co.x for v in bm.verts),
+                "wire_edges": sorted(
+                    sorted(round(v.co.x, 3) for v in e.verts) for e in bm.edges if not e.link_faces),
+            }
+            bm.free()
+
+            # symmetrize: the +X side (wider) is copied onto the -X side.
+            bm = bmesh.new()
+            bmesh.ops.create_cube(bm, size=2.0)
+            for v in bm.verts:
+                if v.co.x > 0.0:
+                    v.co.y *= 2.0
+            # A shape key (twice the basis on the +X side) is mirrored too (the vertices made
+            # by the cut at X = 0 get interpolated values, not checked).
+            key = bm.verts.layers.shape.new("Key")
+            for v in bm.verts:
+                v[key] = v.co * 2.0 if v.co.x > 0.0 else (0.0, 0.0, 0.0)
+            subd.symmetrize(bm, '+X')
+            result["symmetrize"] = sorted({(round(v.co.x, 3), round(abs(v.co.y), 3)) for v in bm.verts})
+            result["symmetrize_key"] = all(
+                (v[key] - v.co * 2.0).length < 1e-5 for v in bm.verts if abs(v.co.x) > 0.5)
+            bm.free()
+
+        data = self._test_tool("execute_blender_code", {"code": _python_fn_body_as_string(code)})
+        self.assertEqual(data["half_ring_center"], [0.0, 0.0, 1.0])
+        self.assertEqual(data["half_ring"], [[0.0, -0.5, 1.0], [2.0, -0.5, 1.0], [2.0, 0.5, 1.0], [0.0, 0.5, 1.0]])
+        self.assertEqual(data["side_center"], [1.0, 0.0, 2.0])
+        self.assertEqual(data["whole_center"], [0.5, 0.0, 0.0])
+        self.assertEqual(data["whole_ring_x"], [-0.5, 1.5, 1.5, -0.5])
+        # All 4 vertices move by 1, including the 2 on X = 0.
+        self.assertEqual(data["whole_moved_x"], [1.0, 1.0, 2.0, 2.0])
+        for key, other_follows in (("move_1", False), ("move_0", True)):
+            move = data[key]
+            self.assertEqual(move["moved_z"], 4.0, key)
+            # One edge (1.0) below with radius 1.5: t = 1/3, smooth weight 0.259.
+            self.assertEqual(move["ring_below_z"], 2.259, key)
+            self.assertEqual(move["plane_x"], [0.0, 0.0], key)
+            self.assertEqual(move["other_follows"], other_follows, key)
+        self.assertEqual(data["creases"], [1.0, 1.0, 0.0])
+        self.assertEqual(data["mesh_crease"], 0.5)
+        # The -X side (9 vertices) is removed, the middle ring (8 vertices) is moved onto the plane.
+        self.assertEqual(data["make_half"], {"removed_vertices": 9, "snapped_vertices": 8})
+        self.assertEqual(data["half"]["min_x"], 0.0)
+        self.assertEqual(data["half"]["sides"], [4])
+        self.assertTrue(data["half"]["boundary_on_plane"])
+        self.assertEqual(data["half"]["wire_edges"], 0)
+        # The -X side (16 + 12 vertices) and the -X end of the wire edge across the plane.
+        self.assertEqual(data["make_half_cut"], {"removed_vertices": 29, "snapped_vertices": 0})
+        self.assertEqual(data["half_cut"]["min_x"], 0.0)
+        self.assertEqual(data["half_cut"]["wire_edges"], [[0.0, 1.0], [2.0, 3.0]])
+        self.assertEqual(data["symmetrize"], [[-1.0, 2.0], [0.0, 1.5], [1.0, 2.0]])
+        self.assertTrue(data["symmetrize_key"])
+
     def test_get_modeling_guide_character(self) -> None:
         """
         The guide's example code builds a clean cage: keep it working.
