@@ -94,7 +94,9 @@ the selection or the mode:
 * `subd.symmetrize(bm, source='+X')`: copies one side of a whole mesh (without a Mirror
   modifier) onto the other.
 * `subd.setup_mirror_subsurf(obj, levels=2)`: the Mirror (merge, clipping) then Subdivision
-  Surface modifiers, reusing and reordering existing ones.
+  Surface modifiers, reusing and reordering existing ones. Call it once the cage is built:
+  the merge distance follows the cage's size (1 mm for a human, 0.17 mm for a 17 cm bird).
+  For a small model, lower the `tolerance` of `make_half` and `symmetrize` (1 mm) too.
 
 `scale_loop` and `move_smooth` keep the vertices on the mirror plane on it, for a half cage
 under a Mirror modifier: pass `mirror=False` for a whole mesh (e.g. after `symmetrize`).
@@ -157,7 +159,7 @@ if tried.users == 0:
 8. **Compare with the references**, item by item (see *References*), and fix what differs.
 9. **Ground contact.** Subdivision shrinks the shape: check the lowest point after modifiers
    (`bounds_world` of `get_object_geometry_summary`) and move the cage so it touches the
-   ground, see *Ground contact* below. Check it again after changing the shape.
+   ground or its support, see *Ground contact* below. Check it again after changing the shape.
 
 ## Pitfalls
 
@@ -172,6 +174,10 @@ if tried.users == 0:
 * **Stale lookup tables.** After creating or deleting elements, `bm.verts[i]` raises until
   `bm.verts.ensure_lookup_table()` is called again (the `subd` helpers do it). Resolve the
   vertices you need into variables before running operators.
+* **New attribute layers.** Adding a layer to a `bmesh` (e.g. `bm.verts.layers.float.new()`,
+  a color or a crease) makes the references to those elements held before it stale: they no
+  longer match, e.g. as dictionary keys (`KeyError: <BMVert(...)>`). Add layers first, or
+  keep indices and look the elements up again (`subd.edit_mesh` adds the crease layer first).
 * **Write back.** Changes to a `bmesh.new()` copy only apply after `bm.to_mesh(mesh)`
   (in Edit Mode: `bmesh.update_edit_mesh(mesh)`), `subd.edit_mesh` does it for you.
 * **Imports.** Code run by `execute_blender_code` starts with nothing imported:
@@ -203,6 +209,10 @@ in Edit Mode, leaving it writes the edit-mesh back over these changes.
 The cage usually moves down by the shrinkage (`moved_by` is negative, a few millimeters
 for the example), so its sole ends up below the origin: expected, the subdivided result
 is what touches the ground.
+
+A subject that doesn't stand on the ground (e.g. a bird on a perch, a figure on a seat)
+rests on its support instead: fit the support to the parts touching it (the toes wrapped
+around the perch, measured after modifiers), rather than moving the cage to `Z = 0`.
 
 <!-- example: ground-contact -->
 ```python

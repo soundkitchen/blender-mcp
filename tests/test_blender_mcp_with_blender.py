@@ -1753,6 +1753,14 @@ class _TestServerMixin:
             result["mirror"] = [tuple(mirror.use_axis), mirror.use_clip, mirror.use_mirror_merge]
             result["levels"] = obj.modifiers["Sub"].levels
 
+            # The merge distance follows the cage's size (mirrored on X), at most 1 mm.
+            small = bpy.data.objects.new("SmallCage", bpy.data.meshes.new("SmallCage"))
+            small.data.from_pydata([(0.0, 0.0, 0.0), (0.03, 0.0, 0.0), (0.03, 0.0, 0.17)], [], [(0, 1, 2)])
+            result["merge_small"] = subd.setup_mirror_subsurf(small)["merge_threshold"]
+            result["merge_given"] = subd.setup_mirror_subsurf(small, merge_threshold=0.0002)["merge_threshold"]
+            result["merge_empty"] = subd.setup_mirror_subsurf(
+                bpy.data.objects.new("EmptyCage", bpy.data.meshes.new("EmptyCage")))["merge_threshold"]
+
         data = self._test_tool("execute_blender_code", {"code": _python_fn_body_as_string(code)})
         self.assertEqual(data["extrude_sources"], [0, 1, 2, 3])
         self.assertTrue(data["source_same_place"])
@@ -1772,6 +1780,11 @@ class _TestServerMixin:
         self.assertIn("no quad", data["wire_error"])
         # Mirror moved before subdivision.
         self.assertEqual(data["modifiers"]["modifiers"], ["Mir", "Sub"])
+        # The test mesh spans more than 1 m: Blender's default.
+        self.assertAlmostEqual(data["modifiers"]["merge_threshold"], 0.001)
+        self.assertAlmostEqual(data["merge_small"], 0.00017)
+        self.assertAlmostEqual(data["merge_given"], 0.0002)
+        self.assertAlmostEqual(data["merge_empty"], 0.001)
         self.assertEqual(data["mirror"], [[True, True, False], True, True])
         self.assertEqual(data["levels"], 3)
 

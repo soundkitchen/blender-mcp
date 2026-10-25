@@ -335,14 +335,21 @@ def bridge_loops(bm: _BMesh, loop_a: Sequence[_BMVert], loop_b: Sequence[_BMVert
     return faces
 
 
-def setup_mirror_subsurf(obj: _Object, levels: int = 2) -> dict[str, Any]:
+def setup_mirror_subsurf(
+        obj: _Object,
+        levels: int = 2,
+        merge_threshold: float | None = None,
+) -> dict[str, Any]:
     """
     Set up the modifiers of a half cage: Mirror on ``X`` (merge and clipping) then Subdivision Surface.
 
     Existing modifiers are reused (the first Mirror without a mirror object and the first
     Subdivision Surface), created when missing and moved so Mirror comes before Subdivision
     Surface. The ``Y`` and ``Z`` axes of a reused Mirror and other modifiers are left as they are.
-    Return the names of the modifiers, in their final order.
+    The Mirror's merge distance is *merge_threshold*, by default 1/1000 of the mirrored cage's
+    largest size, at most 1 mm (Blender's default): a small model (e.g. a 17 cm bird) needs a
+    smaller one, or vertices close to the plane are merged. Build the cage first.
+    Return the names of the modifiers, in their final order, and the merge distance.
     """
     if obj.type != 'MESH':
         raise TypeError("Object {!r} is a {:s}, not a mesh".format(obj.name, obj.type))
@@ -353,6 +360,9 @@ def setup_mirror_subsurf(obj: _Object, levels: int = 2) -> dict[str, Any]:
     mirror.use_axis[0] = True
     mirror.use_mirror_merge = True
     mirror.use_clip = True
+    if merge_threshold is None:
+        merge_threshold = _merge_threshold(obj.data)
+    mirror.merge_threshold = merge_threshold
     subsurf = next((m for m in mods if m.type == 'SUBSURF'), None)
     if subsurf is None:
         subsurf = mods.new("Subdivision", 'SUBSURF')
@@ -361,7 +371,33 @@ def setup_mirror_subsurf(obj: _Object, levels: int = 2) -> dict[str, Any]:
     subsurf_index = mods.find(subsurf.name)
     if mirror_index > subsurf_index:
         mods.move(mirror_index, subsurf_index)
-    return {"modifiers": [m.name for m in mods], "mirror": mirror.name, "subdivision": subsurf.name}
+    return {
+        "modifiers": [m.name for m in mods],
+        "mirror": mirror.name,
+        "subdivision": subsurf.name,
+        "merge_threshold": mirror.merge_threshold,
+    }
+
+
+# The merge distance of a mirrored cage, relative to its size, at most Blender's default.
+_MERGE_THRESHOLD_FACTOR = 0.001
+_MERGE_THRESHOLD_MAX = 0.001
+
+
+def _merge_threshold(mesh: Any) -> float:
+    # The size of the cage with its mirrored copy (`X` mirrored on the plane).
+    verts = bmesh.from_edit_mesh(mesh).verts if mesh.is_editmode else mesh.vertices
+    coords = [v.co for v in verts]
+    if not coords:
+        return _MERGE_THRESHOLD_MAX
+    size = max(
+        2.0 * max(abs(co.x) for co in coords),
+        max(co.y for co in coords) - min(co.y for co in coords),
+        max(co.z for co in coords) - min(co.z for co in coords),
+    )
+    if size <= 0.0:
+        return _MERGE_THRESHOLD_MAX
+    return float(min(_MERGE_THRESHOLD_MAX, size * _MERGE_THRESHOLD_FACTOR))
 
 
 def scale_loop(
@@ -523,6 +559,7 @@ def make_half(bm: _BMesh, tolerance: float = 0.001) -> dict[str, int]:
 
     For a mesh built without a Mirror modifier (e.g. converted from a Skin modifier), before
     :func:`setup_mirror_subsurf`. Vertices within *tolerance* of the plane are moved onto it
+    (lower it for a small model, e.g. ``0.0001`` for a 17 cm bird)
     and faces left on the plane are removed, so the cage is open there. On a half cage, it
     also moves the vertices just off the plane (``off_center_vertices`` of
     ``get_mesh_topology_summary``, with a large enough *tolerance*) back onto it.
@@ -560,7 +597,8 @@ def symmetrize(bm: _BMesh, source: str = '+X', tolerance: float = 0.001) -> None
     onto the other side.
 
     For a mesh without a Mirror modifier: the other side is replaced, faces crossing the
-    plane are cut. Vertices within *tolerance* of the plane are merged with their copy.
+    plane are cut. Vertices within *tolerance* of the plane are merged with their copy
+    (lower it for a small model).
     For a half cage under a Mirror modifier, use :func:`make_half` instead.
     The indices and lookup tables of *bm* are updated.
     """
