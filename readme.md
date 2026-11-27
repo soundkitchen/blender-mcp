@@ -106,6 +106,28 @@ This fork keeps the upstream extension id (`mcp`) and version. If the add-on
 from the Blender Lab extensions repository is already installed, uninstall it
 first so it is clear which one is running.
 
+### Releasing the add-on
+
+Prebuilt zips are attached to the
+[GitHub Releases](https://github.com/soundkitchen/blender-mcp/releases) of this
+fork. Install the attached `mcp-<version>.zip`; the "Source code" archives that
+GitHub adds to every release are not installable add-ons.
+
+Release tags are named `v<version>-fork.<N>`, where `<version>` is the add-on
+version from `blender_manifest.toml` (kept equal to upstream) and `<N>` counts
+up from 1 for each release of that version. The suffix keeps the tags apart
+from the upstream `v<version>` tags.
+
+To publish a release (maintainers), run on an up-to-date, clean `main`:
+
+```sh
+make release_addon
+```
+
+This builds the zip with `make build_addon`, creates and pushes the next
+`v<version>-fork.<N>` tag, and creates the release with `gh release create`.
+It requires the [GitHub CLI](https://cli.github.com/) to be authenticated.
+
 ### Functionality Overview
 
 Note that this is intended to be a fairly minimal add-on.

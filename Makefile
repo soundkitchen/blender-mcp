@@ -5,6 +5,7 @@ export
 
 PYTHON ?= python
 MACOS_BLENDER_BIN = /Applications/Blender.app/Contents/MacOS/Blender
+ADDON_MANIFEST = addon/blender_mcp_addon/blender_manifest.toml
 PYTHON_SOURCE_DIRS_TO_CHECK = mcp/blmcp/ addon/blender_mcp_addon/ chat_client/ _misc/
 
 define HELP_TEXT
@@ -23,6 +24,10 @@ Targets
    * build_addon:       Build the add-on into an installable zip under build/.
                         Uses BLENDER_BIN, then blender in PATH, then
                         /Applications/Blender.app on macOS.
+   * release_addon:     Build the add-on and publish it as a GitHub Release
+                        tagged v<version>-fork.<N> (N counts up from 1 per
+                        add-on version). Requires a clean main that matches
+                        origin/main, and an authenticated gh.
    * format:            Auto-format Python sources with autopep8.
    * readme_update:     Regenerate the tools listing in readme_tools.rst.
 
@@ -121,6 +126,39 @@ build_addon:
 	mkdir -p build && \
 	"$$blender_bin" --command extension build \
 		--source-dir addon/blender_mcp_addon --output-dir build
+
+# Release only what is on origin/main, so the tag matches published sources.
+release_addon:
+	@set -e; \
+	branch="$$(git rev-parse --abbrev-ref HEAD)"; \
+	if [ "$$branch" != "main" ]; then \
+		echo "release_addon: run on main (current branch: $$branch)"; exit 1; \
+	fi; \
+	if [ -n "$$(git status --porcelain)" ]; then \
+		echo "release_addon: the working tree has uncommitted or untracked changes"; exit 1; \
+	fi; \
+	git fetch --quiet origin main; \
+	if [ "$$(git rev-parse HEAD)" != "$$(git rev-parse origin/main)" ]; then \
+		echo "release_addon: main differs from origin/main, pull or push first"; exit 1; \
+	fi; \
+	version="$$(sed -n 's/^version = "\(.*\)"$$/\1/p' $(ADDON_MANIFEST))"; \
+	if [ -z "$$version" ]; then \
+		echo "release_addon: no version found in $(ADDON_MANIFEST)"; exit 1; \
+	fi; \
+	last="$$(git ls-remote --tags --refs origin "refs/tags/v$$version-fork.*" | \
+		sed -n "s|.*refs/tags/v$$version-fork\.\([0-9][0-9]*\)$$|\1|p" | sort -n | tail -n 1)"; \
+	tag="v$$version-fork.$$(( $${last:-0} + 1 ))"; \
+	zip="build/mcp-$$version.zip"; \
+	rm -f "$$zip"; \
+	$(MAKE) --no-print-directory build_addon; \
+	if [ ! -f "$$zip" ]; then \
+		echo "release_addon: $$zip was not built"; exit 1; \
+	fi; \
+	echo "Releasing $$tag with $$zip"; \
+	git tag -a "$$tag" -m "Blender add-on $$version (fork release)"; \
+	git push origin "$$tag"; \
+	gh release create "$$tag" "$$zip" --verify-tag --title "$$tag" \
+		--notes "Blender add-on built from this fork (upstream add-on version $$version). Install mcp-$$version.zip, not the Source code archives."
 
 format:
 	@for d in mcp addon _misc tests chat_client; do \
