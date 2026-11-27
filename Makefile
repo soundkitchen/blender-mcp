@@ -34,7 +34,9 @@ Targets
 Static Source Code Checking
    * check_license:   Verify SPDX headers in all Python files.
    * check_ascii:     Reject non-ASCII characters in sources.
-   * check_mypy:      Run mypy type checking.
+                      Both check files git knows about (tracked, or untracked
+                      and not ignored), so .venv/ and build/ are skipped.
+   * check_mypy:      Run mypy type checking (fails when mypy is not installed).
    * check_pylint:    Run pylint linting.
    * check_ruff:      Run ruff linting.
    * check_vulture:   Run vulture dead-code detection.
@@ -184,7 +186,10 @@ check_license:
 check_ascii:
 	@$(PYTHON) _misc/check_ascii.py
 
+# Without this guard a missing mypy passes: its error message contains no ": error:" line.
 check_mypy:
+	@$(PYTHON) -m mypy --version >/dev/null 2>&1 || \
+		{ echo "mypy: not installed for $(PYTHON) (see mcp/requirements_dev.txt)"; exit 1; }
 	@! $(PYTHON) -m mypy --exclude 'data/api/examples/' $(PYTHON_SOURCE_DIRS_TO_CHECK) 2>&1 | grep -v '^stubs/' | grep ': error:' || \
 		{ echo "mypy: found errors"; exit 1; }
 
