@@ -20,8 +20,8 @@
 ## Running with uvx
 
 The Python package lives under `mcp/`, so pass the subdirectory via `--from`.
-The Blender add-on (see "Blender Add-on" below) must be installed separately;
-it can be built from this repository with `make build_addon`.
+The Blender add-on must be installed separately; `blender-mcp install-addon`
+installs it from the latest GitHub Release (see "Installing the add-on" below).
 
 ```sh
 uvx --from "git+https://github.com/soundkitchen/blender-mcp#subdirectory=mcp" blender-mcp
@@ -87,7 +87,26 @@ the MCP tools to work.
 The add-on provides a preferences panel for configuring the host, port,
 and an optional auto-start setting.
 
-### Installing from this repository
+### Installing the add-on
+
+Install and enable the add-on from the latest
+[GitHub Release](https://github.com/soundkitchen/blender-mcp/releases) with:
+
+```sh
+uvx --from "git+https://github.com/soundkitchen/blender-mcp#subdirectory=mcp" blender-mcp install-addon
+```
+
+This downloads the release's `mcp-<version>.zip` and installs it with
+`blender --command extension install-file -r user_default --enable`.
+Blender is looked up from `--blender PATH`, then `BLENDER_PATH`, then `blender`
+in `PATH`, then `/Applications/Blender.app` on macOS. Restart Blender if it was
+running. Running the command again reinstalls the latest release.
+
+Alternatively, download `mcp-<version>.zip` from the release yourself and drag
+and drop it onto a Blender window (or use *Edit → Preferences → Get Extensions
+→ Install from Disk*), then enable the add-on.
+
+### Building from this repository
 
 Build an installable zip with:
 
@@ -98,9 +117,9 @@ make build_addon
 Blender is looked up from `BLENDER_BIN`, then `blender` in `PATH`, then
 `/Applications/Blender.app` on macOS. Set `BLENDER_BIN` to use another binary.
 
-This writes `build/mcp-<version>.zip`. Drag and drop the zip onto a Blender
-window (or use *Edit → Preferences → Get Extensions → Install from Disk*),
-then enable the add-on.
+This writes `build/mcp-<version>.zip`. Install it with
+`uvx --from ./mcp blender-mcp install-addon --zip build/mcp-<version>.zip`,
+or drag and drop it onto a Blender window as above.
 
 This fork keeps the upstream extension id (`mcp`) and version. If the add-on
 from the Blender Lab extensions repository is already installed, uninstall it

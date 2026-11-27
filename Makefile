@@ -60,7 +60,7 @@ Environment Variables
                        build_addon also falls back to /Applications/Blender.app).
    BLENDER_MCP         Path to the blender-mcp command (default: blender-mcp).
    BLENDER_PATH        Path to the Blender binary used by the MCP server
-                       (default: blender).
+                       and by blender-mcp install-addon (default: blender).
    BLENDER_MCP_HOST    Host the MCP addon listens on (default: localhost).
    BLENDER_MCP_PORT    Port the MCP addon listens on (default: 9876).
    BLENDER_MCP_TIMEOUT Startup timeout in seconds for tests (default: 10).
@@ -96,6 +96,7 @@ help:
 
 test:
 	$(PYTHON) tests/test_tool_listing.py
+	$(PYTHON) tests/test_install_addon.py
 	$(PYTHON) tests/test_rst_parse.py
 	$(PYTHON) tests/test_rst_search.py
 	$(PYTHON) tests/test_mcp_server.py
