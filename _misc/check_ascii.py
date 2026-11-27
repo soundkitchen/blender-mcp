@@ -11,8 +11,9 @@ __all__ = (
 )
 
 import os
-import subprocess
 import sys
+
+from source_files import list_source_files
 
 # Directories to scan.
 _SCAN_DIRS = (
@@ -33,37 +34,17 @@ _EXTENSIONS = (
 )
 
 
-def _source_files(repo_root: str) -> list[str]:
-    """
-    Return the files under ``_SCAN_DIRS`` that git knows about, relative to *repo_root*.
-
-    Tracked files and untracked files that are not ignored are listed,
-    so virtual environments, build directories and caches are skipped,
-    while new files are checked before they are added.
-    """
-    output = subprocess.run(
-        ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z", "--", *_SCAN_DIRS],
-        cwd=repo_root,
-        check=True,
-        capture_output=True,
-    ).stdout
-    result = []
-    # Unmerged files are listed once per stage, so remove duplicates.
-    for path in sorted(set(output.decode("utf-8").split("\0"))):
-        if not path:
-            continue
-        path = os.path.normpath(path)
-        # Tracked files deleted from the working tree are still listed.
-        if os.path.isfile(os.path.join(repo_root, path)):
-            result.append(path)
-    return result
-
-
 def main() -> int:
     repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+    try:
+        filepaths_rel = list_source_files(repo_root, _SCAN_DIRS)
+    except RuntimeError as ex:
+        print("ERROR: {:s}".format(str(ex)), file=sys.stderr)
+        return 1
+
     fail = 0
-    for filepath_rel in _source_files(repo_root):
+    for filepath_rel in filepaths_rel:
         if any(filepath_rel.startswith(d + os.sep) for d in _SKIP_DIRS):
             continue
         if not filepath_rel.endswith(_EXTENSIONS):
