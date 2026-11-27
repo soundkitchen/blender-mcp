@@ -24,6 +24,8 @@ from mcp.server.mcpserver import (
     MCPServer,  # pylint: disable=import-error,no-name-in-module
 )
 
+from blmcp import install_addon
+
 # NOTE(@ideasman42): this was written to support LLAMA-C++'s Web UI,
 # which is one of the nicer ways to run this locally.
 # It is not full HTTP support because there looks to be many options for this protocol.
@@ -53,7 +55,20 @@ def main() -> int:
             default=8000,
             help="Port to bind to for HTTP transports (default: 8000).",
         )
+
+    # Without a sub-command the MCP server runs, so existing client configurations keep working.
+    subparsers = parser.add_subparsers(dest="command", metavar="COMMAND")
+    install_parser = subparsers.add_parser(
+        "install-addon",
+        help="Install and enable the Blender add-on from the latest GitHub Release (or a local zip).",
+        description="Install and enable the Blender add-on from the latest GitHub Release (or a local zip).",
+    )
+    install_addon.add_arguments(install_parser)
+
     args = parser.parse_args()
+
+    if args.command == "install-addon":
+        return install_addon.run(args)
 
     # Load prompts.
     data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
