@@ -143,9 +143,12 @@ To publish a release (maintainers), run on an up-to-date, clean `main`:
 make release_addon
 ```
 
-This builds the zip with `make build_addon`, creates and pushes the next
-`v<version>-fork.<N>` tag, and creates the release with `gh release create`.
-It requires the [GitHub CLI](https://cli.github.com/) to be authenticated.
+This builds the zip with `make build_addon` and creates the release with
+`gh release create`, which also creates the next `v<version>-fork.<N>` tag on
+the current commit when the release is published (the tag is then fetched
+locally). It requires the [GitHub CLI](https://cli.github.com/) to be
+authenticated. If the upload fails, no tag is created, but a draft release may
+be left behind; delete it with `gh release delete <tag>` before trying again.
 
 ### Functionality Overview
 

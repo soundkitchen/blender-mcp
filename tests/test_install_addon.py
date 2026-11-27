@@ -11,6 +11,7 @@ No network access or Blender is needed, downloads and Blender are mocked.
 __all__ = ()
 
 import argparse
+import email.message
 import importlib
 import io
 import json
@@ -19,6 +20,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import urllib.error
 from contextlib import redirect_stderr, redirect_stdout
 from typing import Any
 from unittest import mock
@@ -222,6 +224,31 @@ class TestRun(unittest.TestCase):
         self.assertEqual(returncode, 0)
         self.assertEqual(installed, [("mcp-1.0.3.zip", b"zip-bytes")])
         self.assertIn("v1.0.3-fork.1", out)
+
+    def _run_with_http_error(self, code: int) -> tuple[int, str]:
+        error = urllib.error.HTTPError(self.mod._RELEASES_URL, code, "error", email.message.Message(), None)
+        with (
+            mock.patch.object(self.mod, "_urlopen", side_effect=error),
+            mock.patch.object(self.mod.subprocess, "run") as run_mock,
+        ):
+            returncode, _out, err = self._run(_args(blender="/x/blender"))
+        run_mock.assert_not_called()
+        return returncode, err
+
+    def test_rate_limit_suggests_zip(self) -> None:
+        for code in (403, 429):
+            with self.subTest(code=code):
+                returncode, err = self._run_with_http_error(code)
+                self.assertEqual(returncode, 1)
+                self.assertIn("HTTP {:d}".format(code), err)
+                self.assertIn("rate limit", err)
+                self.assertIn("--zip", err)
+
+    def test_other_http_error_has_no_rate_limit_hint(self) -> None:
+        returncode, err = self._run_with_http_error(404)
+        self.assertEqual(returncode, 1)
+        self.assertIn("HTTP 404", err)
+        self.assertNotIn("rate limit", err)
 
     def test_no_release(self) -> None:
         with (

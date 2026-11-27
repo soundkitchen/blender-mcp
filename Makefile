@@ -60,7 +60,9 @@ Environment Variables
                        build_addon also falls back to /Applications/Blender.app).
    BLENDER_MCP         Path to the blender-mcp command (default: blender-mcp).
    BLENDER_PATH        Path to the Blender binary used by the MCP server
-                       and by blender-mcp install-addon (default: blender).
+                       (default: blender) and by blender-mcp install-addon
+                       (default: blender in PATH, then /Applications/Blender.app
+                       on macOS).
    BLENDER_MCP_HOST    Host the MCP addon listens on (default: localhost).
    BLENDER_MCP_PORT    Port the MCP addon listens on (default: 9876).
    BLENDER_MCP_TIMEOUT Startup timeout in seconds for tests (default: 10).
@@ -129,6 +131,8 @@ build_addon:
 		--source-dir addon/blender_mcp_addon --output-dir build
 
 # Release only what is on origin/main, so the tag matches published sources.
+# The tag is created by `gh release create` (on publishing), not pushed beforehand,
+# so a failed upload does not leave a tag without a release.
 release_addon:
 	@set -e; \
 	branch="$$(git rev-parse --abbrev-ref HEAD)"; \
@@ -137,6 +141,9 @@ release_addon:
 	fi; \
 	if [ -n "$$(git status --porcelain)" ]; then \
 		echo "release_addon: the working tree has uncommitted or untracked changes"; exit 1; \
+	fi; \
+	if ! gh auth status >/dev/null 2>&1; then \
+		echo "release_addon: gh is not authenticated, run gh auth login first"; exit 1; \
 	fi; \
 	git fetch --quiet origin main; \
 	if [ "$$(git rev-parse HEAD)" != "$$(git rev-parse origin/main)" ]; then \
@@ -156,10 +163,15 @@ release_addon:
 		echo "release_addon: $$zip was not built"; exit 1; \
 	fi; \
 	echo "Releasing $$tag with $$zip"; \
-	git tag -a "$$tag" -m "Blender add-on $$version (fork release)"; \
-	git push origin "$$tag"; \
-	gh release create "$$tag" "$$zip" --verify-tag --title "$$tag" \
-		--notes "Blender add-on built from this fork (upstream add-on version $$version). Install mcp-$$version.zip, not the Source code archives."
+	if ! gh release create "$$tag" "$$zip" --target "$$(git rev-parse HEAD)" --title "$$tag" \
+		--notes "Blender add-on built from this fork (upstream add-on version $$version). Install mcp-$$version.zip, not the Source code archives."; then \
+		echo "release_addon: gh release create failed."; \
+		echo "  GitHub creates the tag only when the release is published, so no tag is left behind,"; \
+		echo "  but a draft release may be. Check with 'gh release list' and remove it with"; \
+		echo "  'gh release delete $$tag' before running release_addon again."; \
+		exit 1; \
+	fi; \
+	git fetch --quiet origin "refs/tags/$$tag:refs/tags/$$tag"
 
 format:
 	@for d in mcp addon _misc tests chat_client; do \

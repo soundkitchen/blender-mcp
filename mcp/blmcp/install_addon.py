@@ -29,7 +29,11 @@ import urllib.error
 import urllib.request
 
 _REPO = "soundkitchen/blender-mcp"
+# Only the first page is read: GitHub lists the newest releases first,
+# and this fork is not expected to reach 100 releases.
+# Follow the `Link` header for further pages if it ever does.
 _RELEASES_URL = "https://api.github.com/repos/{:s}/releases?per_page=100".format(_REPO)
+_RELEASES_PAGE_URL = "https://github.com/{:s}/releases".format(_REPO)
 _TIMEOUT = 60.0
 
 # Fork release tags, e.g. `v1.0.3-fork.2`.
@@ -130,7 +134,7 @@ def _download_latest(dest_dir: str) -> str:
     if selected is None:
         raise RuntimeError(
             "No add-on release (tag v<version>-fork.<N> with an mcp-<version>.zip) "
-            "found in https://github.com/{:s}/releases".format(_REPO)
+            "found in {:s}".format(_RELEASES_PAGE_URL)
         )
     tag, name, url = selected
     print("Downloading {:s} from release {:s}".format(name, tag), flush=True)
@@ -138,6 +142,20 @@ def _download_latest(dest_dir: str) -> str:
     with open(path, "wb") as fh:
         fh.write(_urlopen(url, "application/octet-stream"))
     return path
+
+
+def _download_error_message(ex: Exception) -> str:
+    if not isinstance(ex, urllib.error.HTTPError):
+        return str(ex)
+    message = "HTTP {:d} from {:s}".format(ex.code, ex.url)
+    # Unauthenticated GitHub API requests are limited per IP address,
+    # GitHub answers 403 or 429 once the limit is reached.
+    if ex.code in {403, 429}:
+        message += (
+            ". The GitHub API rate limit (60 requests per hour without authentication) may have been reached. "
+            "Try again later, or download mcp-<version>.zip from {:s} and install it with --zip."
+        ).format(_RELEASES_PAGE_URL)
+    return message
 
 
 def _install(blender: str, zip_path: str) -> int:
@@ -171,11 +189,7 @@ def run(args: argparse.Namespace) -> int:
             except (OSError, ValueError, TypeError, RuntimeError) as ex:
                 # `URLError` and `HTTPError` are `OSError` subclasses,
                 # `ValueError` and `TypeError` cover an invalid JSON response.
-                if isinstance(ex, urllib.error.HTTPError):
-                    message = "HTTP {:d} from {:s}".format(ex.code, ex.url)
-                else:
-                    message = str(ex)
-                print("Failed to download the add-on: {:s}".format(message), file=sys.stderr)
+                print("Failed to download the add-on: {:s}".format(_download_error_message(ex)), file=sys.stderr)
                 return 1
             returncode = _install(blender, zip_path)
 
