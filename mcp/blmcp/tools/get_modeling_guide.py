@@ -16,7 +16,7 @@ from mcp.server.mcpserver import MCPServer  # pylint: disable=import-error,no-na
 from mcp.types import ToolAnnotations  # pylint: disable=import-error,no-name-in-module
 
 # Each topic is a Markdown file in `data/guides/`.
-GuideTopic = Literal[
+_GuideTopic = Literal[
     "character",
 ]
 
@@ -28,7 +28,7 @@ def register(mcp: MCPServer) -> None:
             read_only_hint=True,
         )
     )
-    def get_modeling_guide(topic: GuideTopic) -> dict[str, object]:
+    def get_modeling_guide(topic: _GuideTopic) -> dict[str, object]:
         """
         Return a step-by-step modeling guide for *topic*, with pitfalls, checks and tested example code.
 

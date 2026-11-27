@@ -34,12 +34,23 @@ Targets
 Static Source Code Checking
    * check_license:   Verify SPDX headers in all Python files.
    * check_ascii:     Reject non-ASCII characters in sources.
-   * check_mypy:      Run mypy type checking.
+                      Both check files git knows about (tracked, or untracked
+                      and not ignored), so .venv/ and build/ are skipped.
+                      Ignore rules include .git/info/exclude and the global
+                      excludes file, so a new file matching personal ignore
+                      rules is checked only once it is added.
+   * check_mypy:      Run mypy type checking (fails when mypy is not installed
+                      or does not finish).
    * check_pylint:    Run pylint linting.
    * check_ruff:      Run ruff linting.
    * check_vulture:   Run vulture dead-code detection.
    * check_namespace: Verify __all__ is defined in all Python modules.
    * check_all:       Run all checks (ruff, mypy, vulture, license, ascii, namespace).
+
+   The tools run as "PYTHON -m <tool>", so install mcp/requirements_dev.txt
+   for PYTHON, or let uv provide them:
+
+     make check_all PYTHON="uv run --project mcp --with-requirements mcp/requirements_dev.txt python"
 
 Reference Data
    * update_reference_manual:
@@ -184,19 +195,30 @@ check_license:
 check_ascii:
 	@$(PYTHON) _misc/check_ascii.py
 
+# Errors are found by grepping the output (errors under stubs/ are ignored),
+# so a missing mypy (no ": error:" line) and a crash (exit status 2 or more)
+# are checked separately, otherwise they would pass.
 check_mypy:
-	@! $(PYTHON) -m mypy --exclude 'data/api/examples/' $(PYTHON_SOURCE_DIRS_TO_CHECK) 2>&1 | grep -v '^stubs/' | grep ': error:' || \
-		{ echo "mypy: found errors"; exit 1; }
+	@$(PYTHON) -m mypy --version >/dev/null 2>&1 || \
+		{ echo "mypy: not installed for $(PYTHON) (see mcp/requirements_dev.txt)"; exit 1; }
+	@status=0; \
+	output="$$($(PYTHON) -m mypy --exclude 'data/api/examples/' $(PYTHON_SOURCE_DIRS_TO_CHECK) 2>&1)" || status=$$?; \
+	if [ "$$status" -gt 1 ]; then \
+		printf '%s\n' "$$output"; echo "mypy: failed to run (exit status $$status)"; exit 1; \
+	fi; \
+	if printf '%s\n' "$$output" | grep -v '^stubs/' | grep ': error:'; then \
+		echo "mypy: found errors"; exit 1; \
+	fi
 
 check_pylint:
-	pylint $(PYTHON_SOURCE_DIRS_TO_CHECK) \
+	$(PYTHON) -m pylint $(PYTHON_SOURCE_DIRS_TO_CHECK) \
 		--disable=C0103,C0115,C0116,C0209,C0413,C0415,R0801,R0903,R0912,R0914,R0915,W0122
 
 check_ruff:
-	ruff check $(PYTHON_SOURCE_DIRS_TO_CHECK)
+	$(PYTHON) -m ruff check $(PYTHON_SOURCE_DIRS_TO_CHECK)
 
 check_vulture:
-	vulture $(PYTHON_SOURCE_DIRS_TO_CHECK) \
+	$(PYTHON) -m vulture $(PYTHON_SOURCE_DIRS_TO_CHECK) \
 		--exclude mcp/blmcp/data/api/examples \
 		--ignore-decorators '@mcp.tool,@mcp.prompt' \
 		--ignore-names 'bl_*,draw,execute,exclude' \
