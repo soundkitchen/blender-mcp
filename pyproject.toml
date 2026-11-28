@@ -81,3 +81,12 @@ module = [
     "mathutils", "mathutils.*",
 ]
 ignore_missing_imports = true
+
+# `make check_pylint` runs pylint from the repository root,
+# so the pylint settings in `mcp/`, `addon/` and `chat_client/` are not read.
+[tool.pylint.format]
+max-line-length = 120
+
+[tool.pylint.imports]
+# The `mcp/` directory at the root would otherwise make the `mcp` package first-party.
+known-third-party = ["mcp"]

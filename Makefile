@@ -41,7 +41,8 @@ Static Source Code Checking
                       rules is checked only once it is added.
    * check_mypy:      Run mypy type checking (fails when mypy is not installed
                       or does not finish).
-   * check_pylint:    Run pylint linting.
+   * check_pylint:    Run pylint linting (not part of check_all, it still
+                      reports existing warnings).
    * check_ruff:      Run ruff linting.
    * check_vulture:   Run vulture dead-code detection.
    * check_namespace: Verify __all__ is defined in all Python modules.
@@ -214,8 +215,9 @@ check_mypy:
 		echo "mypy: found errors"; exit 1; \
 	fi
 
+# `chat_client/` has no `__init__.py`, pylint cannot load it as a directory.
 check_pylint:
-	$(PYTHON) -m pylint $(PYTHON_SOURCE_DIRS_TO_CHECK) \
+	$(PYTHON) -m pylint $(patsubst chat_client/,chat_client/chat_client.py,$(PYTHON_SOURCE_DIRS_TO_CHECK)) \
 		--disable=C0103,C0115,C0116,C0209,C0413,C0415,R0801,R0903,R0912,R0914,R0915,W0122
 
 check_ruff:
