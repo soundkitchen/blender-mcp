@@ -8,6 +8,10 @@ __all__ = (
     "register",
 )
 
+from mcp.server.mcpserver import Image, MCPServer  # pylint: disable=import-error,no-name-in-module
+from mcp.types import ToolAnnotations  # pylint: disable=import-error,no-name-in-module
+
+from blmcp.tools.render_viewport_as_image_toolcode import Params
 from blmcp.tools_helpers import (
     toolcode_format_call,
     toolcode_load_from_filepath,
@@ -15,9 +19,6 @@ from blmcp.tools_helpers import (
 )
 from blmcp.tools_helpers.connection import send_code
 from blmcp.tools_helpers.render_image import render_response_as_image_and_info
-from blmcp.tools.render_viewport_as_image_toolcode import Params
-from mcp.server.mcpserver import MCPServer, Image  # pylint: disable=import-error,no-name-in-module
-from mcp.types import ToolAnnotations  # pylint: disable=import-error,no-name-in-module
 
 _TOOL_CALL = toolcode_wrap_with_calling_convention(toolcode_load_from_filepath(__file__))
 

@@ -11,9 +11,10 @@ __all__ = (
 import os
 from typing import Literal
 
-from blmcp.tools_helpers import data_dir
 from mcp.server.mcpserver import MCPServer  # pylint: disable=import-error,no-name-in-module
 from mcp.types import ToolAnnotations  # pylint: disable=import-error,no-name-in-module
+
+from blmcp.tools_helpers import data_dir
 
 # Each topic is a Markdown file in `data/guides/`.
 _GuideTopic = Literal[

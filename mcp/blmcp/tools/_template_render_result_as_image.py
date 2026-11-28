@@ -154,6 +154,7 @@ def _render_as_image(
     """
     import os
     import time
+
     import bpy  # pylint: disable=import-error,no-name-in-module
 
     use_deferred = not bpy.app.background

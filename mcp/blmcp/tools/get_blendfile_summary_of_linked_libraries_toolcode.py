@@ -43,7 +43,7 @@ def main(params: None) -> Result:
                 for item in collection:  # type: ignore[union-attr]
                     if hasattr(item, "library") and item.library == lib:
                         count += 1
-            except Exception:  # pylint: disable=broad-exception-caught
+            except Exception:  # pylint: disable=broad-exception-caught  # noqa: S110
                 # Some `bpy.data` attributes look iterable but raise
                 # when traversed. Safe to skip for counting purposes.
                 pass

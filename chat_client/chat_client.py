@@ -31,12 +31,10 @@ import json
 import os
 import urllib.error
 import urllib.request
-
 from typing import Any
 
 from mcp import ClientSession, StdioServerParameters  # pylint: disable=import-error,no-name-in-module
 from mcp.client.stdio import stdio_client  # pylint: disable=import-error,no-name-in-module
-
 
 # ---------------------------------------------------------------------------
 # OpenAI API helpers
@@ -246,143 +244,142 @@ async def _run(
     parts = server_command.split()
     params = StdioServerParameters(command=parts[0], args=parts[1:], env=env or None)
 
-    async with stdio_client(params) as (read, write):
-        async with ClientSession(read, write) as session:
-            init_result = await session.initialize()
-            instructions = init_result.instructions or ""
-            tools_result = await session.list_tools()
+    async with stdio_client(params) as (read, write), ClientSession(read, write) as session:
+        init_result = await session.initialize()
+        instructions = init_result.instructions or ""
+        tools_result = await session.list_tools()
 
-            mcp_tools = [
-                {
-                    "name": t.name,
-                    "description": t.description or "",
-                    "inputSchema": t.input_schema,
-                }
-                for t in tools_result.tools
-            ]
+        mcp_tools = [
+            {
+                "name": t.name,
+                "description": t.description or "",
+                "inputSchema": t.input_schema,
+            }
+            for t in tools_result.tools
+        ]
 
+        if provider == "openai":
+            llm_tools = _mcp_tools_to_openai(mcp_tools)
+        else:
+            llm_tools = _mcp_tools_to_claude(mcp_tools)
+
+        if non_interactive:
+            print(
+                "Connected to MCP server ({:d} tools).".format(len(mcp_tools))
+            )
+        else:
+            print(
+                "Connected to MCP server ({:d} tools). "
+                "Type your message or Ctrl-D to quit.".format(len(mcp_tools))
+            )
+
+        # Conversation history.
+        messages: list[dict[str, Any]] = []
+
+        # OpenAI uses a system message in the messages list;
+        # Claude uses a separate `system` parameter.
+        system_text = ""
+        if instructions:
             if provider == "openai":
-                llm_tools = _mcp_tools_to_openai(mcp_tools)
+                messages.append({"role": "system", "content": instructions})
             else:
-                llm_tools = _mcp_tools_to_claude(mcp_tools)
+                system_text = instructions
 
-            if non_interactive:
-                print(
-                    "Connected to MCP server ({:d} tools).".format(len(mcp_tools))
-                )
+        single_shot = non_interactive
+        while True:
+            # Read user input.
+            if prompt is not None:
+                user_input = prompt
+                prompt = None
             else:
-                print(
-                    "Connected to MCP server ({:d} tools). "
-                    "Type your message or Ctrl-D to quit.".format(len(mcp_tools))
-                )
+                try:
+                    user_input = input("\n> ")
+                except (EOFError, KeyboardInterrupt):
+                    print()
+                    break
 
-            # Conversation history.
-            messages: list[dict[str, Any]] = []
+                if not user_input.strip():
+                    continue
 
-            # OpenAI uses a system message in the messages list;
-            # Claude uses a separate `system` parameter.
-            system_text = ""
-            if instructions:
-                if provider == "openai":
-                    messages.append({"role": "system", "content": instructions})
-                else:
-                    system_text = instructions
+            messages.append({"role": "user", "content": user_input})
 
-            single_shot = non_interactive
+            # LLM loop: keep calling the API until we get a plain text
+            # reply (no tool calls).
             while True:
-                # Read user input.
-                if prompt is not None:
-                    user_input = prompt
-                    prompt = None
-                else:
-                    try:
-                        user_input = input("\n> ")
-                    except (EOFError, KeyboardInterrupt):
-                        print()
-                        break
-
-                    if not user_input.strip():
-                        continue
-
-                messages.append({"role": "user", "content": user_input})
-
-                # LLM loop: keep calling the API until we get a plain text
-                # reply (no tool calls).
-                while True:
-                    try:
-                        if provider == "openai":
-                            response = _api_chat_completions(
-                                api_url, messages, llm_tools, model,
-                            )
-                        else:
-                            assert api_key is not None
-                            assert model is not None
-                            claude_opts: dict[str, Any] = {
-                                "model": model,
-                                "max_tokens": opts.get("max_tokens", 4096),
-                                "system": system_text,
-                            }
-                            response = _api_claude_messages(
-                                api_url, api_key, messages, llm_tools,
-                                claude_opts,
-                            )
-                    except urllib.error.URLError as ex:
-                        print("HTTP error: {:s}".format(str(ex)))
-                        break
-
+                try:
                     if provider == "openai":
-                        assistant_msg, tool_calls, text, done = (
-                            _process_openai_response(response)
+                        response = _api_chat_completions(
+                            api_url, messages, llm_tools, model,
                         )
                     else:
-                        assistant_msg, tool_calls, text, done = (
-                            _process_claude_response(response)
+                        assert api_key is not None
+                        assert model is not None
+                        claude_opts: dict[str, Any] = {
+                            "model": model,
+                            "max_tokens": opts.get("max_tokens", 4096),
+                            "system": system_text,
+                        }
+                        response = _api_claude_messages(
+                            api_url, api_key, messages, llm_tools,
+                            claude_opts,
                         )
-
-                    # Append the assistant message to history.
-                    messages.append(assistant_msg)
-
-                    if tool_calls:
-                        if provider == "openai":
-                            for tc_id, tc_name, tc_args in tool_calls:
-                                print("  -> calling {:s}".format(tc_name))
-                                result_text = await _call_tool(
-                                    session, tc_name, tc_args,
-                                )
-                                messages.append({
-                                    "role": "tool",
-                                    "tool_call_id": tc_id,
-                                    "content": result_text,
-                                })
-                        else:
-                            tool_results: list[dict[str, Any]] = []
-                            for tc_id, tc_name, tc_args in tool_calls:
-                                print("  -> calling {:s}".format(tc_name))
-                                result_text = await _call_tool(
-                                    session, tc_name, tc_args,
-                                )
-                                tool_results.append({
-                                    "type": "tool_result",
-                                    "tool_use_id": tc_id,
-                                    "content": result_text,
-                                })
-                            messages.append({
-                                "role": "user",
-                                "content": tool_results,
-                            })
-                        # Loop back to let the LLM process tool results.
-                        continue
-
-                    # Plain assistant reply.
-                    if text:
-                        print("\n{:s}".format(text))
-
-                    if done:
-                        break
-
-                # Single-prompt mode: exit after one turn.
-                if single_shot:
+                except urllib.error.URLError as ex:
+                    print("HTTP error: {:s}".format(str(ex)))
                     break
+
+                if provider == "openai":
+                    assistant_msg, tool_calls, text, done = (
+                        _process_openai_response(response)
+                    )
+                else:
+                    assistant_msg, tool_calls, text, done = (
+                        _process_claude_response(response)
+                    )
+
+                # Append the assistant message to history.
+                messages.append(assistant_msg)
+
+                if tool_calls:
+                    if provider == "openai":
+                        for tc_id, tc_name, tc_args in tool_calls:
+                            print("  -> calling {:s}".format(tc_name))
+                            result_text = await _call_tool(
+                                session, tc_name, tc_args,
+                            )
+                            messages.append({
+                                "role": "tool",
+                                "tool_call_id": tc_id,
+                                "content": result_text,
+                            })
+                    else:
+                        tool_results: list[dict[str, Any]] = []
+                        for tc_id, tc_name, tc_args in tool_calls:
+                            print("  -> calling {:s}".format(tc_name))
+                            result_text = await _call_tool(
+                                session, tc_name, tc_args,
+                            )
+                            tool_results.append({
+                                "type": "tool_result",
+                                "tool_use_id": tc_id,
+                                "content": result_text,
+                            })
+                        messages.append({
+                            "role": "user",
+                            "content": tool_results,
+                        })
+                    # Loop back to let the LLM process tool results.
+                    continue
+
+                # Plain assistant reply.
+                if text:
+                    print("\n{:s}".format(text))
+
+                if done:
+                    break
+
+            # Single-prompt mode: exit after one turn.
+            if single_shot:
+                break
 
 
 # ---------------------------------------------------------------------------

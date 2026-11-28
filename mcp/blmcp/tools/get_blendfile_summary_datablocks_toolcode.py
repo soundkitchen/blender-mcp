@@ -35,7 +35,7 @@ def main(params: None) -> Result:
                 n = len(val)  # type: ignore[arg-type]
                 if n > 0:
                     counts[attr] = n
-            except Exception:  # pylint: disable=broad-exception-caught
+            except Exception:  # pylint: disable=broad-exception-caught  # noqa: S110
                 # Some `bpy.data` attributes look like collections but
                 # raise when accessed (e.g. during undo). Safe to skip.
                 pass

@@ -14,7 +14,7 @@ aggressive = 2
 [tool.ruff]
 line-length = 120
 indent-width = 4
-target-version = "py314"
+target-version = "py313"
 
 [tool.ruff.lint]
 ignore = [

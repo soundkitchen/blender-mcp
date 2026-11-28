@@ -8,11 +8,12 @@ __all__ = (
     "register",
 )
 
+from mcp.server.mcpserver import MCPServer  # pylint: disable=import-error,no-name-in-module
+from mcp.types import ToolAnnotations  # pylint: disable=import-error,no-name-in-module
+
 from blmcp.tools_helpers.blender_cli import run_blender_cli, synced_blend_for_cli
 from blmcp.tools_helpers.blender_modules import blender_modules_register, blender_modules_setup_code
 from blmcp.tools_helpers.connection import send_code
-from mcp.server.mcpserver import MCPServer  # pylint: disable=import-error,no-name-in-module
-from mcp.types import ToolAnnotations  # pylint: disable=import-error,no-name-in-module
 
 
 def register(mcp: MCPServer) -> None:
