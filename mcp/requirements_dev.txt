@@ -1,7 +1,11 @@
 # Development.
+# Keep in sync with the `dev` group of the root `pyproject.toml`
+# (where `uv.lock` pins the versions).
 autopep8
 mypy
+numpy
 pylint
 ruff
+types-docutils
 types-PyYAML
 vulture

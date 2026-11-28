@@ -8,6 +8,9 @@ __all__ = (
     "register",
 )
 
+from mcp.server.mcpserver import MCPServer  # pylint: disable=import-error,no-name-in-module
+from mcp.types import ToolAnnotations  # pylint: disable=import-error,no-name-in-module
+
 from blmcp.tools_helpers import (
     toolcode_format_call,
     toolcode_load_from_filepath,
@@ -15,8 +18,6 @@ from blmcp.tools_helpers import (
 )
 from blmcp.tools_helpers.blender_cli import run_blender_cli, synced_blend_for_cli
 from blmcp.tools_helpers.connection import send_code
-from mcp.server.mcpserver import MCPServer  # pylint: disable=import-error,no-name-in-module
-from mcp.types import ToolAnnotations  # pylint: disable=import-error,no-name-in-module
 
 _TOOL_CALL = toolcode_wrap_with_calling_convention(toolcode_load_from_filepath(__file__))
 

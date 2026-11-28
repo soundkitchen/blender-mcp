@@ -38,6 +38,7 @@ def _deferred_tool_check_for_file_output(
 
 def main(params: Params) -> Result | Callable[[], dict[str, object] | None]:
     import os
+
     import bpy  # pylint: disable=import-error,no-name-in-module
 
     use_deferred = not bpy.app.background

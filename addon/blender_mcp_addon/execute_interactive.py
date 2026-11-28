@@ -28,8 +28,8 @@ def run() -> float | None:
     try:
         did_work = mcp_to_blender_server.poll()
     except Exception:  # pylint: disable=broad-exception-caught
-        import traceback
         import sys
+        import traceback
         print(
             "Error: unhandled exception in the MCP server timer.\n"
             "This may be a bug in Blender-MCP, as errors should not be raised at this point, continuing:\n"

@@ -787,8 +787,8 @@ def main(params: Params) -> Result:
         offscreen.free()
         _gpu_state_restore(state)
     color.dimensions = image_width * image_height * 4
-    pixels = np.frombuffer(bytes(color), dtype=np.uint8).reshape(image_height, image_width, 4)
-    pixels = pixels[:, :, :3].astype(np.float32) / 255.0
+    color_ubyte = np.frombuffer(bytes(color), dtype=np.uint8).reshape(image_height, image_width, 4)
+    pixels = color_ubyte[:, :, :3].astype(np.float32) / 255.0
     model_mask = _clip_to_rect(
         np.asarray(depth, dtype=np.float32).reshape(panel_height, panel_width) < 1.0, view, bounds_rect,
     )

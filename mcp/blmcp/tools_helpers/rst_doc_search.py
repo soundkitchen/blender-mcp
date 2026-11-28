@@ -21,8 +21,7 @@ __all__ = (
 import math
 import os
 import re
-from typing import Callable, Iterator
-
+from collections.abc import Callable, Iterator
 
 # Shared description template for the search_*_docs tools. Both
 # tools have identical user-facing semantics; only the corpus
@@ -431,7 +430,7 @@ def search(
     # score an integer in the response as LLM consumers expect
     # while avoiding per-fold rounding drift.
     for hit in hits:
-        hit["score"] = int(round(hit["score"]))  # type: ignore[arg-type]
+        hit["score"] = round(hit["score"])  # type: ignore[arg-type, call-overload]
 
     # Python's sort is stable, so equal-count hits preserve walk order.
     hits.sort(key=lambda h: -h["score"])  # type: ignore[operator,return-value]
@@ -460,7 +459,7 @@ def search(
             return {"hits": [], "truncated": False}
         hit = dict(hits[index])
         rel_for_expand = str(hit["path"])
-        seed_idx = int(hit["_seed_idx"])  # type: ignore[arg-type]
+        seed_idx = int(hit["_seed_idx"])  # type: ignore[arg-type, call-overload]
         # Reconstruct the absolute path the same way iter_rst_paths
         # produces it, so the cache key matches and the fetch is a
         # hit rather than a re-parse.

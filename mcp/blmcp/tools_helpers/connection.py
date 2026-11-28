@@ -68,7 +68,7 @@ def send_code(code: str, strict_json: bool) -> dict[str, object]:
             "Cannot connect to Blender at {:s}:{:d}. "
             "Ensure Blender is running with the MCP addon enabled and the server started.".format(host, port)
         ) from ex
-    except socket.timeout as ex:
+    except TimeoutError as ex:
         raise ConnectionError(
             "Blender connection timed out at {:s}:{:d}".format(host, port)
         ) from ex

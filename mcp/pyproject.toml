@@ -49,6 +49,7 @@ module = [
 ignore_missing_imports = true
 
 [tool.ruff]
+line-length = 120
 extend-exclude = ["blmcp/data"]
 
 [tool.ruff.lint]

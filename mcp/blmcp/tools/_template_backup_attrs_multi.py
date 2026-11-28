@@ -7,7 +7,7 @@
 __all__ = ()
 
 import contextlib
-from typing import Generator
+from collections.abc import Generator
 
 
 @contextlib.contextmanager

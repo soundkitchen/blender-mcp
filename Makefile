@@ -7,6 +7,10 @@ PYTHON ?= python
 MACOS_BLENDER_BIN = /Applications/Blender.app/Contents/MacOS/Blender
 ADDON_MANIFEST = addon/blender_mcp_addon/blender_manifest.toml
 PYTHON_SOURCE_DIRS_TO_CHECK = mcp/blmcp/ addon/blender_mcp_addon/ chat_client/ _misc/
+# `<python version>:<directories>` for each mypy run: `mcp/` is distributed for
+# Python 3.10 and later (`requires-python`), the add-on runs with Blender's Python
+# (3.13) and `_misc/` with the development environment.
+MYPY_RUNS = 3.10:mcp/blmcp/,chat_client/ 3.13:addon/blender_mcp_addon/,_misc/
 
 define HELP_TEXT
 
@@ -40,17 +44,23 @@ Static Source Code Checking
                       excludes file, so a new file matching personal ignore
                       rules is checked only once it is added.
    * check_mypy:      Run mypy type checking (fails when mypy is not installed
-                      or does not finish).
-   * check_pylint:    Run pylint linting.
+                      or does not finish). mcp/ and chat_client/ are checked
+                      as Python 3.10, the add-on and _misc/ as Python 3.13.
+   * check_pylint:    Run pylint linting (not part of check_all, it still
+                      reports existing warnings).
    * check_ruff:      Run ruff linting.
    * check_vulture:   Run vulture dead-code detection.
    * check_namespace: Verify __all__ is defined in all Python modules.
    * check_all:       Run all checks (ruff, mypy, vulture, license, ascii, namespace).
 
-   The tools run as "PYTHON -m <tool>", so install mcp/requirements_dev.txt
-   for PYTHON, or let uv provide them:
+   The tools run as "PYTHON -m <tool>". The development environment at the
+   repository root (pyproject.toml) provides them at the versions pinned in
+   uv.lock:
 
-     make check_all PYTHON="uv run --project mcp --with-requirements mcp/requirements_dev.txt python"
+     make check_all PYTHON="uv run python"
+
+   Without uv, install mcp/ and mcp/requirements_dev.txt (same tools, no
+   versions) for PYTHON.
 
 Reference Data
    * update_reference_manual:
@@ -200,28 +210,39 @@ check_ascii:
 # are checked separately, otherwise they would pass.
 check_mypy:
 	@$(PYTHON) -m mypy --version >/dev/null 2>&1 || \
-		{ echo "mypy: not installed for $(PYTHON) (see mcp/requirements_dev.txt)"; exit 1; }
-	@status=0; \
-	output="$$($(PYTHON) -m mypy --exclude 'data/api/examples/' $(PYTHON_SOURCE_DIRS_TO_CHECK) 2>&1)" || status=$$?; \
-	if [ "$$status" -gt 1 ]; then \
-		printf '%s\n' "$$output"; echo "mypy: failed to run (exit status $$status)"; exit 1; \
-	fi; \
-	if printf '%s\n' "$$output" | grep -v '^stubs/' | grep ': error:'; then \
+		{ echo "mypy: not installed for $(PYTHON) (try PYTHON=\"uv run python\")"; exit 1; }
+	@fail=0; \
+	for run in $(MYPY_RUNS); do \
+		version="$${run%%:*}"; dirs="$$(printf '%s' "$${run#*:}" | tr ',' ' ')"; \
+		echo "mypy (Python $$version): $$dirs"; \
+		status=0; \
+		output="$$($(PYTHON) -m mypy --python-version "$$version" --exclude 'data/api/examples/' $$dirs 2>&1)" || status=$$?; \
+		if [ "$$status" -gt 1 ]; then \
+			printf '%s\n' "$$output"; echo "mypy: failed to run (exit status $$status)"; exit 1; \
+		fi; \
+		if printf '%s\n' "$$output" | grep -v '^stubs/' | grep ': error:'; then \
+			fail=1; \
+		fi; \
+	done; \
+	if [ "$$fail" -ne 0 ]; then \
 		echo "mypy: found errors"; exit 1; \
 	fi
 
+# `chat_client/` has no `__init__.py`, pylint cannot load it as a directory.
 check_pylint:
-	$(PYTHON) -m pylint $(PYTHON_SOURCE_DIRS_TO_CHECK) \
+	$(PYTHON) -m pylint $(patsubst chat_client/,chat_client/chat_client.py,$(PYTHON_SOURCE_DIRS_TO_CHECK)) \
 		--disable=C0103,C0115,C0116,C0209,C0413,C0415,R0801,R0903,R0912,R0914,R0915,W0122
 
 check_ruff:
 	$(PYTHON) -m ruff check $(PYTHON_SOURCE_DIRS_TO_CHECK)
 
+# `block_text`, `rawtext` and `state_machine` are arguments that docutils passes
+# to the directive and role functions in `rst_parse_docs.py`.
 check_vulture:
 	$(PYTHON) -m vulture $(PYTHON_SOURCE_DIRS_TO_CHECK) \
 		--exclude mcp/blmcp/data/api/examples \
 		--ignore-decorators '@mcp.tool,@mcp.prompt' \
-		--ignore-names 'bl_*,draw,execute,exclude' \
+		--ignore-names 'bl_*,draw,execute,exclude,block_text,rawtext,state_machine' \
 		--min-confidence 61
 
 check_namespace:

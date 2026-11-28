@@ -14,8 +14,7 @@ __all__ = (
 
 import argparse
 
-from . import execute_blocking
-from . import mcp_to_blender_server
+from . import execute_blocking, mcp_to_blender_server
 
 
 def cli_execute(argv: list[str]) -> int:

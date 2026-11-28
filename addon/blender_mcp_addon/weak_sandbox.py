@@ -26,7 +26,7 @@ import sys
 from typing import Any, Self
 
 
-def _blocked_exit(*args: object, **kwargs: object) -> None:  # noqa: ARG001
+def _blocked_exit(*args: object, **kwargs: object) -> None:
     raise RuntimeError("sys.exit() is not allowed in LLM-generated code")
 
 
@@ -57,15 +57,19 @@ _BLOCKED_OPS: tuple[tuple[str, str], ...] = (
     ("wm.quit_blender", "Terminates the Blender process, use bpy.app.quit() if you must"),
     (
         "wm.read_factory_settings",
-        "Resets all user preferences and startup file, "
-        "use bpy.ops.wm.read_homefile() or "
-        "bpy.ops.wm.read_homefile(use_empty=True, use_factory_startup=True) instead",
+        (
+            "Resets all user preferences and startup file, "
+            "use bpy.ops.wm.read_homefile() or "
+            "bpy.ops.wm.read_homefile(use_empty=True, use_factory_startup=True) instead"
+        ),
     ),
     (
         "wm.read_factory_userpref",
-        "Resets all user preferences, "
-        "use bpy.ops.wm.read_homefile() or "
-        "bpy.ops.wm.read_homefile(use_empty=True, use_factory_startup=True) instead",
+        (
+            "Resets all user preferences, "
+            "use bpy.ops.wm.read_homefile() or "
+            "bpy.ops.wm.read_homefile(use_empty=True, use_factory_startup=True) instead"
+        ),
     ),
     ("wm.read_userpref", "May reset user preferences disabling this add-on, avoid calling"),
 )

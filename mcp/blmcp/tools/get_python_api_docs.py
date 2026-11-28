@@ -11,15 +11,15 @@ __all__ = (
 import difflib
 import os
 
+from mcp.server.mcpserver import MCPServer  # pylint: disable=import-error,no-name-in-module
+from mcp.types import ToolAnnotations  # pylint: disable=import-error,no-name-in-module
+
 from blmcp.tools_helpers.rst_parse_docs import (
     data_dir,
     doctree_for_path,
     find_definition_in_doctree,
     list_doctree_definitions,
 )
-from mcp.server.mcpserver import MCPServer  # pylint: disable=import-error,no-name-in-module
-from mcp.types import ToolAnnotations  # pylint: disable=import-error,no-name-in-module
-
 
 _DOC_EXT = ".rst"
 

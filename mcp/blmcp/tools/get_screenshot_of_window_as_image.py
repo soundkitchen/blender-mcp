@@ -10,16 +10,17 @@ __all__ = (
 
 import base64
 
+from mcp.server.mcpserver import Image, MCPServer  # pylint: disable=import-error,no-name-in-module
+from mcp.server.mcpserver.exceptions import ToolError  # pylint: disable=import-error,no-name-in-module
+from mcp.types import ToolAnnotations  # pylint: disable=import-error,no-name-in-module
+
+from blmcp.tools.get_screenshot_of_window_as_image_toolcode import Params
 from blmcp.tools_helpers import (
     toolcode_format_call,
     toolcode_load_from_filepath,
     toolcode_wrap_with_calling_convention,
 )
 from blmcp.tools_helpers.connection import send_code
-from blmcp.tools.get_screenshot_of_window_as_image_toolcode import Params
-from mcp.server.mcpserver import MCPServer, Image  # pylint: disable=import-error,no-name-in-module
-from mcp.server.mcpserver.exceptions import ToolError  # pylint: disable=import-error,no-name-in-module
-from mcp.types import ToolAnnotations  # pylint: disable=import-error,no-name-in-module
 
 _TOOL_CALL = toolcode_wrap_with_calling_convention(toolcode_load_from_filepath(__file__))
 

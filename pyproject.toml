@@ -1,0 +1,98 @@
+# Development environment for the whole repository (not distributed).
+#
+# A uv workspace with `mcp/` as its member: `uv.lock` pins both the server's
+# dependencies and the development tools, and `.venv` is shared, also by
+# `uv --directory mcp run blender-mcp`. Run the checks with:
+#
+#   make check_all PYTHON="uv run python"
+#
+# `mcp/` stays a standalone package (distributed with uvx, which reads only
+# `mcp/pyproject.toml` and no lock file).
+
+[project]
+name = "blender-mcp-dev"
+version = "0"
+# Same as `mcp/`, so the lock covers every Python version the server supports.
+requires-python = ">=3.10"
+
+[dependency-groups]
+dev = [
+    "autopep8",
+    "blender-mcp",
+    "mypy",
+    "numpy",
+    "pylint",
+    "ruff",
+    "types-docutils",
+    "types-PyYAML",
+    "vulture",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["mcp"]
+
+[tool.uv.sources]
+blender-mcp = { workspace = true }
+
+# For `chat_client/`, which has no ruff settings of its own
+# (`mcp/`, `addon/` and `_misc/` use their own `pyproject.toml`).
+# Same rules as upstream's `addon/pyproject.toml`.
+[tool.ruff]
+line-length = 120
+indent-width = 4
+target-version = "py313"
+
+[tool.ruff.lint]
+ignore = [
+    # Don't suggest f-string.
+    # Why disable? Personal preference.
+    "UP032",
+    # Do not catch blind exception: `Exception`.
+    # Why disable? There are times we *need* to be generic.
+    "BLE001",
+    # Combine `if` statements using `and`.
+    # Why disable? Makes the code more dense and difficult to refator (at times).
+    "SIM102",
+    # Combine `if` branches using logical `or` operator.
+    # Why disable? Code may be grouped in ways that make sense conceptually.
+    "SIM114",
+    # `__slots__` is not sorted.
+    # Why disable? Slots are often grouped logically, matching `__init__`, sometimes using groups.
+    "RUF023",
+]
+
+[tool.ruff.lint.isort]
+# The `mcp/` directory at the root would otherwise make the `mcp` package first-party.
+known-first-party = ["blmcp"]
+known-third-party = ["mcp"]
+
+# `make check_mypy` runs mypy from the repository root, so these settings apply
+# to all checked directories (the `[tool.mypy]` of `mcp/pyproject.toml` is not read).
+# The Python version is given per directory by `make check_mypy`.
+[tool.mypy]
+
+# Modules that only exist inside Blender, no type information is available.
+[[tool.mypy.overrides]]
+module = [
+    "bl_math", "bl_math.*",
+    "blf", "blf.*",
+    "bmesh", "bmesh.*",
+    "bpy", "bpy.*",
+    "bpy_extras", "bpy_extras.*",
+    "gpu", "gpu.*",
+    "gpu_extras", "gpu_extras.*",
+    "mathutils", "mathutils.*",
+]
+ignore_missing_imports = true
+
+# `make check_pylint` runs pylint from the repository root,
+# so the pylint settings in `mcp/`, `addon/` and `chat_client/` are not read.
+[tool.pylint.format]
+max-line-length = 120
+
+[tool.pylint.imports]
+# The `mcp/` directory at the root would otherwise make the `mcp` package first-party.
+known-third-party = ["mcp"]

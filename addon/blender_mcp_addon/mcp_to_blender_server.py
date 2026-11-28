@@ -249,7 +249,7 @@ def _execute_code(
     namespace: dict[str, object] = {"result": {}}
     with CaptureOutput() as captured, WeakSandboxForLLM():
         try:
-            exec(code, namespace)
+            exec(code, namespace)  # noqa: S102
         except Exception:  # pylint: disable=broad-exception-caught
             response: dict[str, object] = {"status": "error", "message": traceback.format_exc()}
             if captured.stdout:
@@ -363,7 +363,7 @@ def _close_conn(conn: socket.socket) -> None:
     """
     try:
         conn.close()
-    except Exception:  # pylint: disable=broad-exception-caught
+    except Exception:  # pylint: disable=broad-exception-caught  # noqa: S110
         pass
 
 
@@ -604,7 +604,7 @@ def _handle_blocking_client(conn: socket.socket) -> bool:
             exec_result = _ExecResult({"status": "error", "message": traceback.format_exc()})
         conn.sendall(_encode_response(exec_result.response))
         return True
-    except socket.timeout:
+    except TimeoutError:
         try:
             err = {"status": "error", "message": "Client timed out"}
             conn.sendall(_encode_response(err))

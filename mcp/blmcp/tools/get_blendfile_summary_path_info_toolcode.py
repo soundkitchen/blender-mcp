@@ -15,7 +15,6 @@ import os
 import time
 from typing import NamedTuple
 
-
 # Blender appends a number (1-32) to the file path for each backup.
 _MAX_BACKUPS = 32
 

@@ -34,9 +34,11 @@ import collections
 import io
 import os
 from collections.abc import (
+    Callable,
     Iterable,
     Iterator,
 )
+from typing import Any, ClassVar
 
 import docutils  # pylint: disable=import-error
 import docutils.parsers.rst  # pylint: disable=import-error
@@ -66,7 +68,7 @@ def _directive_ignore(
     return [docutils.nodes.doctest_block(text, text, codeblock=True)]
 
 
-_directive_ignore.content = True
+_directive_ignore.content = True  # type: ignore[attr-defined]
 
 
 def _directive_ignore_recursive(
@@ -79,7 +81,7 @@ def _directive_ignore_recursive(
     return []
 
 
-_directive_ignore_recursive.content = True
+_directive_ignore_recursive.content = True  # type: ignore[attr-defined]
 
 
 class _DirectivePreserve(docutils.parsers.rst.Directive):
@@ -93,7 +95,7 @@ class _DirectivePreserve(docutils.parsers.rst.Directive):
     optional_arguments = 99
     final_argument_whitespace = True
     has_content = True
-    option_spec = None
+    option_spec: ClassVar[dict[str, Callable[[str], Any]] | None] = None
 
     def run(self):
         container = docutils.nodes.container()
@@ -119,7 +121,7 @@ class _DirectiveLiteralInclude(_DirectivePreserve):
     ``get_python_api_docs``) can honour ``:lines:`` slicing - the base
     class's ``option_spec = None`` drops them on the floor.
     """
-    option_spec = {
+    option_spec: ClassVar[dict[str, Callable[[str], Any]] | None] = {
         "lines": directives.unchanged,
         "language": directives.unchanged,
         "dedent": directives.unchanged,
@@ -233,7 +235,7 @@ def _register_stubs() -> None:
             "versionchanged",
             "warning",
     ):
-        directives.register_directive(name, _directive_ignore)
+        directives.register_directive(name, _directive_ignore)  # type: ignore[arg-type]
 
     # Navigation-only directives: drop entirely.
     for name in (
@@ -257,7 +259,7 @@ def _register_stubs() -> None:
             "vimeo",
             "youtube",
     ):
-        directives.register_directive(name, _directive_ignore_recursive)
+        directives.register_directive(name, _directive_ignore_recursive)  # type: ignore[arg-type]
 
     # Preserve the visible text of every role we encounter - identifiers
     # inside cross-references like `:class:`bpy.types.BlendData` are
@@ -688,6 +690,7 @@ def _iter_parse_doctrees(
 
     # pylint: disable-next=import-outside-toplevel
     import itertools
+
     # pylint: disable-next=import-outside-toplevel
     from concurrent.futures import ProcessPoolExecutor
     # `chunksize=1` (also the default) gives finest-grained load
