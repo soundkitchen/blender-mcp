@@ -68,7 +68,7 @@ def _directive_ignore(
     return [docutils.nodes.doctest_block(text, text, codeblock=True)]
 
 
-_directive_ignore.content = True
+_directive_ignore.content = True  # type: ignore[attr-defined]
 
 
 def _directive_ignore_recursive(
@@ -81,7 +81,7 @@ def _directive_ignore_recursive(
     return []
 
 
-_directive_ignore_recursive.content = True
+_directive_ignore_recursive.content = True  # type: ignore[attr-defined]
 
 
 class _DirectivePreserve(docutils.parsers.rst.Directive):
@@ -235,7 +235,7 @@ def _register_stubs() -> None:
             "versionchanged",
             "warning",
     ):
-        directives.register_directive(name, _directive_ignore)
+        directives.register_directive(name, _directive_ignore)  # type: ignore[arg-type]
 
     # Navigation-only directives: drop entirely.
     for name in (
@@ -259,7 +259,7 @@ def _register_stubs() -> None:
             "vimeo",
             "youtube",
     ):
-        directives.register_directive(name, _directive_ignore_recursive)
+        directives.register_directive(name, _directive_ignore_recursive)  # type: ignore[arg-type]
 
     # Preserve the visible text of every role we encounter - identifiers
     # inside cross-references like `:class:`bpy.types.BlendData` are

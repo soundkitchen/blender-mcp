@@ -62,3 +62,22 @@ ignore = [
 # The `mcp/` directory at the root would otherwise make the `mcp` package first-party.
 known-first-party = ["blmcp"]
 known-third-party = ["mcp"]
+
+# `make check_mypy` runs mypy from the repository root, so these settings apply
+# to all checked directories (the `[tool.mypy]` of `mcp/pyproject.toml` is not read).
+[tool.mypy]
+python_version = "3.13"
+
+# Modules that only exist inside Blender, no type information is available.
+[[tool.mypy.overrides]]
+module = [
+    "bl_math", "bl_math.*",
+    "blf", "blf.*",
+    "bmesh", "bmesh.*",
+    "bpy", "bpy.*",
+    "bpy_extras", "bpy_extras.*",
+    "gpu", "gpu.*",
+    "gpu_extras", "gpu_extras.*",
+    "mathutils", "mathutils.*",
+]
+ignore_missing_imports = true
