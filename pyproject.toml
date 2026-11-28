@@ -31,8 +31,8 @@ package = false
 [tool.uv.sources]
 blender-mcp = { path = "mcp", editable = true }
 
-# For `chat_client/` and `_misc/`, which have no ruff settings of their own
-# (`mcp/` and `addon/` use their own `pyproject.toml`).
+# For `chat_client/`, which has no ruff settings of its own
+# (`mcp/`, `addon/` and `_misc/` use their own `pyproject.toml`).
 # Same rules as upstream's `addon/pyproject.toml`.
 [tool.ruff]
 line-length = 120
@@ -65,8 +65,8 @@ known-third-party = ["mcp"]
 
 # `make check_mypy` runs mypy from the repository root, so these settings apply
 # to all checked directories (the `[tool.mypy]` of `mcp/pyproject.toml` is not read).
+# The Python version is given per directory by `make check_mypy`.
 [tool.mypy]
-python_version = "3.13"
 
 # Modules that only exist inside Blender, no type information is available.
 [[tool.mypy.overrides]]
