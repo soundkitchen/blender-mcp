@@ -221,11 +221,13 @@ check_pylint:
 check_ruff:
 	$(PYTHON) -m ruff check $(PYTHON_SOURCE_DIRS_TO_CHECK)
 
+# `block_text`, `rawtext` and `state_machine` are arguments that docutils passes
+# to the directive and role functions in `rst_parse_docs.py`.
 check_vulture:
 	$(PYTHON) -m vulture $(PYTHON_SOURCE_DIRS_TO_CHECK) \
 		--exclude mcp/blmcp/data/api/examples \
 		--ignore-decorators '@mcp.tool,@mcp.prompt' \
-		--ignore-names 'bl_*,draw,execute,exclude' \
+		--ignore-names 'bl_*,draw,execute,exclude,block_text,rawtext,state_machine' \
 		--min-confidence 61
 
 check_namespace:
