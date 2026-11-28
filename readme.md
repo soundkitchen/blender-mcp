@@ -210,15 +210,20 @@ See [readme_tools.rst](readme_tools.rst) for the tools the MCP server exposes.
 
 ## Development
 
-The repository root holds a development environment (`pyproject.toml`), not
-distributed, that installs `mcp/` together with the static checking tools at
-the versions pinned in `uv.lock`. Run the checks and the unit tests with
-[uv](https://docs.astral.sh/uv/):
+The repository root is a [uv](https://docs.astral.sh/uv/) workspace (not
+distributed) with `mcp/` as its member. A single `uv.lock` at the root pins
+both the server's dependencies and the static checking tools, and they are
+installed into the root `.venv`, which `uv --directory mcp run blender-mcp`
+uses as well. Run the checks and the unit tests with:
 
 ```sh
 make check_all PYTHON="uv run python"
 make test PYTHON="uv run python"
 ```
+
+Run `uv sync` at the root rather than in `mcp/`: syncing in `mcp/` installs
+only the server's dependencies and removes the development tools (the next
+`uv run` at the root installs them again).
 
 `mcp/requirements_dev.txt` lists the same tools (without versions) for setups
 that do not use uv.
