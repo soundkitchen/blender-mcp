@@ -47,10 +47,14 @@ Static Source Code Checking
    * check_namespace: Verify __all__ is defined in all Python modules.
    * check_all:       Run all checks (ruff, mypy, vulture, license, ascii, namespace).
 
-   The tools run as "PYTHON -m <tool>", so install mcp/requirements_dev.txt
-   for PYTHON, or let uv provide them:
+   The tools run as "PYTHON -m <tool>". The development environment at the
+   repository root (pyproject.toml) provides them at the versions pinned in
+   uv.lock:
 
-     make check_all PYTHON="uv run --project mcp --with-requirements mcp/requirements_dev.txt python"
+     make check_all PYTHON="uv run python"
+
+   Without uv, install mcp/ and mcp/requirements_dev.txt (same tools, no
+   versions) for PYTHON.
 
 Reference Data
    * update_reference_manual:
@@ -200,7 +204,7 @@ check_ascii:
 # are checked separately, otherwise they would pass.
 check_mypy:
 	@$(PYTHON) -m mypy --version >/dev/null 2>&1 || \
-		{ echo "mypy: not installed for $(PYTHON) (see mcp/requirements_dev.txt)"; exit 1; }
+		{ echo "mypy: not installed for $(PYTHON) (try PYTHON=\"uv run python\")"; exit 1; }
 	@status=0; \
 	output="$$($(PYTHON) -m mypy --exclude 'data/api/examples/' $(PYTHON_SOURCE_DIRS_TO_CHECK) 2>&1)" || status=$$?; \
 	if [ "$$status" -gt 1 ]; then \

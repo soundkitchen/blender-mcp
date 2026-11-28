@@ -207,3 +207,18 @@ requests to Blender.
 ### Tools
 
 See [readme_tools.rst](readme_tools.rst) for the tools the MCP server exposes.
+
+## Development
+
+The repository root holds a development environment (`pyproject.toml`), not
+distributed, that installs `mcp/` together with the static checking tools at
+the versions pinned in `uv.lock`. Run the checks and the unit tests with
+[uv](https://docs.astral.sh/uv/):
+
+```sh
+make check_all PYTHON="uv run python"
+make test PYTHON="uv run python"
+```
+
+`mcp/requirements_dev.txt` lists the same tools (without versions) for setups
+that do not use uv.

@@ -1,0 +1,32 @@
+# Development environment for the whole repository (not distributed).
+#
+# The tool versions are pinned in `uv.lock`, run the checks with:
+#
+#   make check_all PYTHON="uv run python"
+#
+# `mcp/` stays a standalone package (distributed with uvx),
+# it is installed here so mypy and the tests can import it.
+
+[project]
+name = "blender-mcp-dev"
+version = "0"
+requires-python = ">=3.13"
+
+[dependency-groups]
+dev = [
+    "autopep8",
+    "blender-mcp",
+    "mypy",
+    "numpy",
+    "pylint",
+    "ruff",
+    "types-docutils",
+    "types-PyYAML",
+    "vulture",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+blender-mcp = { path = "mcp", editable = true }
